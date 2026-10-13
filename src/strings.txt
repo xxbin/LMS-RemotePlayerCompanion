@@ -1,0 +1,5 @@
+PLUGIN_REMOTEPLAYERCOMPANION_NAME
+	EN	Remote Player Companion
+
+PLUGIN_REMOTEPLAYERCOMPANION_DESC
+	EN	Serves a rolling DSTM-backed track buffer to cached/offline remote players.

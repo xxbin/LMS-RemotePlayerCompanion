@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<extensions>
+	<details>
+		<title lang="EN">Remote Player Companion</title>
+	</details>
+	<plugins>
+		<plugin name="RemotePlayerCompanion" version="@VERSION@" minTarget="8.5.0" maxTarget="*">
+			<title lang="EN">Remote Player Companion</title>
+			<desc lang="EN">Serves a rolling DSTM-backed track buffer to cached/offline remote players.</desc>
+			<category>tools</category>
+			<creator>xxbin</creator>
+			<link>https://github.com/xxbin/LMS-RemotePlayerCompanion</link>
+			<url>@URL@</url>
+			<sha>@SHA@</sha>
+		</plugin>
+	</plugins>
+</extensions>

@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+build/
+
+# Working notes for whoever is developing this, not part of the plugin. They
+# name a particular development server and its paths, so they do not travel
+# with the published repository.
+CLAUDE.md
+docs/superpowers/
