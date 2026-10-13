@@ -2,4 +2,4 @@ PLUGIN_REMOTEPLAYERCOMPANION_NAME
 	EN	Remote Player Companion
 
 PLUGIN_REMOTEPLAYERCOMPANION_DESC
-	EN	Serves a rolling DSTM-backed track buffer to cached/offline remote players.
+	EN	Provides a cached or offline remote player with what it needs from the server: dynamic playlists, playback history, favourites and more.

@@ -6,7 +6,7 @@
 	<plugins>
 		<plugin name="RemotePlayerCompanion" version="@VERSION@" minTarget="8.5.0" maxTarget="*">
 			<title lang="EN">Remote Player Companion</title>
-			<desc lang="EN">Serves a rolling DSTM-backed track buffer to cached/offline remote players.</desc>
+			<desc lang="EN">Provides a cached or offline remote player with what it needs from the server: dynamic playlists, playback history, favourites and more.</desc>
 			<category>tools</category>
 			<creator>xxbin</creator>
 			<link>https://github.com/xxbin/LMS-RemotePlayerCompanion</link>
