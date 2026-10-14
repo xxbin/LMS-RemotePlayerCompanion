@@ -386,8 +386,8 @@ and RandomPlay's settings are where it is changed.
 Everything the plugin logs goes under one category, `plugin.remoteplayercompanion`,
 which LMS offers in its logging settings beside every other logger. It is left at
 ERROR, so a healthy server says nothing; setting it to DEBUG is what makes the
-lines above — and the queue's own account of every fill, seed and batch — appear
-in `server.log`.
+lines above — and the queue's own account of every fill, seed, batch and refusal —
+appear in `server.log`.
 
 **Provider tokens are resolved without registering a client.** `%handlers` is
 lexical to DSTM, so the only public door is `getHandler($client)`, which reads

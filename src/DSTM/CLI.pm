@@ -291,6 +291,15 @@ sub cliNextbatch {
 		my $have  = $live ? Plugins::RemotePlayerCompanion::DSTM::Queue->total($live) : 0;
 
 		if ( !$have && $reason eq 'timeout' ) {
+			# Worth its own line, because this refusal is otherwise invisible:
+			# the fill being waited on may still be running, so not even a
+			# 'fill end' is guaranteed to follow, and a request that waited its
+			# whole budget and got nothing would leave no trace at all.
+			main::DEBUGLOG && $log->is_debug
+				&& $log->debug( "nextbatch $playerid: gave up after "
+					. Plugins::RemotePlayerCompanion::DSTM::Refill::WAIT_BUDGET
+					. "s waiting for $need, with nothing buffered (SOURCE_TIMEOUT)" );
+
 			return _fail( $request, 'SOURCE_TIMEOUT', 'no tracks within the wait budget' );
 		}
 
@@ -805,6 +814,20 @@ sub _fail {
 
 	$code    ||= 'INTERNAL';
 	$message ||= $code;
+
+	# Every refusal in the family comes through here, so this is where a
+	# command that was turned away says so. Without it a refused request leaves
+	# no trace on the server at all: the caller gets an error code and the log
+	# stays silent, which is the wrong way round for anything being worked out
+	# from the log. The command is named because the caller who sent a bad one
+	# is usually the one reading this.
+	if ( main::DEBUGLOG && $log->is_debug ) {
+		my $asked = $request->getParam('playerid');
+
+		$log->debug( 'refused: ' . $request->getRequestString
+			. ' playerid=' . ( defined $asked && length $asked ? $asked : 'none' )
+			. " -> $code" );
+	}
 
 	$request->addResult( 'error',  { code => $code, message => $message } );
 	$request->addResult( '_error', "$code: $message" );
