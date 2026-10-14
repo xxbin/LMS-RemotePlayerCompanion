@@ -36,9 +36,9 @@ use constant KEY_PREFIX  => 'rpc_queue_';
 use constant SEEN_HARD   => 5000;    # dedup memory ceiling
 use constant SEEN_KEEP   => 2500;    # how many of the newest survive a prune
 
-# How deep a queue is when config does not say. The record owns this value:
+# How deep a queue is when nothing says otherwise. The record owns this value:
 # CLI reads it from here rather than keeping a second copy that could drift.
-use constant DEFAULT_MAX => 100;
+use constant DEFAULT_MAX => 20;
 
 sub _key { KEY_PREFIX . $_[0] }
 
@@ -78,6 +78,7 @@ sub create {
 		provider   => $opt{provider},
 		max        => $opt{max} || DEFAULT_MAX,
 		tracks     => [],
+		seed       => [],
 		seen       => {},
 		created    => time,
 		updated    => time,
@@ -85,6 +86,39 @@ sub create {
 	};
 
 	return $class->save($rec);
+}
+
+# What the provider should derive from: the seed plus whatever the buffer
+# holds. The seed is not queue content -- see seed() below -- but a provider
+# that reads the queue should still see it, or a queue built around a track
+# would stop looking like it.
+sub playlist {
+	my ( $class, $rec ) = @_;
+
+	return [ @{ $rec->{seed} || [] }, @{ $rec->{tracks} || [] } ];
+}
+
+# The derivation material an explicit seed set, as opposed to the buffer.
+#
+# '||=' rather than a plain read is what lets a record written before this
+# field existed read as empty. That one line is why the cache namespace
+# version does not have to move.
+sub seed {
+	my ( $class, $rec ) = @_;
+
+	return $rec->{seed} ||= [];
+}
+
+# Replace the derivation material with a named track.
+#
+# Replaces rather than appends: "I am playing this now" is a statement about
+# the present, not an accumulation.
+sub setSeed {
+	my ( $class, $rec, $url ) = @_;
+
+	$rec->{seed} = [ $url ];
+
+	return $rec;
 }
 
 sub destroy {

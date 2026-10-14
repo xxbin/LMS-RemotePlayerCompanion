@@ -38,7 +38,7 @@ class AsyncDelivery(DSTMTestCase):
         self.assertGreater(seeded, 0, "could not seed a queue")
 
         started = time.time()
-        r = self.lms.dstm("config", self.playerid, f"token:{token}", f"max:{TARGET}")
+        r = self.use_provider(token, TARGET)
         took = time.time() - started
 
         growth = []
@@ -75,9 +75,15 @@ class AsyncDelivery(DSTMTestCase):
                 "about the plugin either way.")
 
         self.assertGreater(growth[-1][1], seeded, f"the buffer stayed at {seeded}")
-        self.assertLess(took, 5, "config waited for the provider")
-        self.assertEqual(reported, seeded,
-                         "config reported tracks it should not have had yet")
+        self.assertLess(took, 5, "the command waited for the provider")
+
+        # There used to be an assertion here that the answer reported the
+        # buffer as it was *before* the provider delivered. It cannot hold any
+        # more, and its loss is real: adopting a provider is now seed's job,
+        # and that is a second command after config, so by the time an answer
+        # is composed the provider may legitimately have delivered. What is
+        # still checked is that the command returned without waiting (above)
+        # and that the later answer reached the queue (above that).
 
         r = self.lms.dstm("queue", self.playerid)
         rows = r.get("queue_loop") or []

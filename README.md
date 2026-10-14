@@ -49,10 +49,19 @@ player never waits on a slow or asynchronous music-discovery provider.
 ```
 ["", ["remoteplayercompanion", "dstm", "config",    "playerid:02:00:79:b3:5d:7c",
                                             "token:PLUGIN_RANDOM_TITLEMIX_WITH_GENRES",
-                                            "max:100"]]
+                                            "max:50"]]
+["", ["remoteplayercompanion", "dstm", "seed",      "playerid:02:00:79:b3:5d:7c",
+                                            "url:file:///music/what-im-playing.flac"]]
 ["", ["remoteplayercompanion", "dstm", "nextbatch", "playerid:02:00:79:b3:5d:7c", "count:20"]]
 ["", ["remoteplayercompanion", "dstm", "queue",     "playerid:02:00:79:b3:5d:7c"]]
 ```
+
+`seed` is what establishes a queue: it adopts the provider from the player's
+own Dont Stop The Music setting — which is why the `playerid` has to be one LMS
+knows — and, given a `url:` or `id:`, builds the queue around that one track
+without ever handing it to the player. `config` sets the depth and may name a
+provider instead; both are optional, since `seed` alone is enough to make a
+queue.
 
 Every command in the family is registered with `needsClient = 0`, and carries
 the queue in the `playerid` parameter with `params[0]` left empty.

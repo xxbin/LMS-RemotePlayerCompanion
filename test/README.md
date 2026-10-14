@@ -63,13 +63,32 @@ directory passes when run on its own, which is a confusing afternoon.
 
 ## What a run needs
 
-The plugin installed and enabled, and at least one DSTM provider. A server
-without RandomPlay cannot be tested at all, since that is how a queue is
-seeded — `DSTMTestCase.setUpClass` skips the whole class for it.
+The plugin installed and enabled, at least one DSTM provider, and **a player
+LMS knows about**. A server without RandomPlay cannot be tested at all, since
+that is how a queue is seeded — `DSTMTestCase.setUpClass` skips the whole class
+for it, and it skips the same way when it can find no player.
 
-Expect **around three minutes** against a real server: 47 tests, of which 32
+### The player, and what the suites do to it
+
+A queue adopts its provider from the player it is named for, so the queue *is*
+the player: there is no separate per-run queue name any more. Two consequences
+worth knowing before running these against a server you care about:
+
+- **The suites change a real player's Dont Stop The Music provider.** They
+  remember the value they found, print it, and put it back in `tearDownClass`.
+  A run killed outright cannot restore it; the printed value is how it is put
+  back by hand, and the preference file is
+  `prefs/plugin/dontstopthemusic.prefs` on the server.
+- **Two runs against one server collide**, because they share one player's
+  queue. They used to be isolated by giving each run its own queue name.
+
+`LMS_PLAYER` names the player to drive. Without it, the first player LMS
+reports is used. **No player id is ever hardcoded here** — this repository is
+public, and a MAC address is somebody's device.
+
+Expect **around three and a half minutes** against a real server: 56 tests, of which 35
 drive a server and most of those wait on fills that take a second or two; the
-other 15 are the packaging suite, which finishes before you notice it. Two
+other 21 are the packaging suite, which finishes before you notice it. Two
 thirds of the time is
 `test_sources`, which seeds a queue and offers it to each of two dozen
 providers in turn -- the per-provider progress it prints as it goes is the

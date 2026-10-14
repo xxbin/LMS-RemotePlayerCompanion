@@ -39,7 +39,7 @@ class FillTimeout(DSTMTestCase):
             self.assertGreater(seeded, 0, "could not seed a queue")
 
             started = time.time()
-            self.lms.dstm("config", self.playerid, f"token:{token}", f"max:{DEEP}")
+            self.use_provider(token, DEEP)
 
             series = []
             ended_at = None

@@ -11,6 +11,14 @@ package Plugins::RemotePlayerCompanion::DSTM::Provider;
 # preference, so the swap never has to stay open across an async provider
 # call.
 #
+# The token now arrives from that same preference (see adopted() below), which
+# makes the swap look redundant. It is not. getHandler resolves whatever the
+# preference says *now*, while the queue record holds what it said when the
+# queue was seeded; those diverge the moment a user changes the setting for
+# their player, and the record is the queue's truth. So the record's token is
+# what gets resolved, and that means putting it back into a preference for the
+# length of the call.
+#
 # Turning the answer into tracks is the other half, and providers answer in
 # several shapes. The routing, and the reasons for refusing what we refuse,
 # are in expand() below.
@@ -84,6 +92,72 @@ sub isOffered {
 	return 1 if $token =~ /^PLUGIN_/;
 
 	return scalar grep { $_ eq $token } EXTRA_TOKENS;
+}
+
+# The provider this player is set to, if it is one a queue may use.
+#
+# Returns ( $token, $error ). The token is undef exactly when $error is set.
+#
+# Checked against the same whitelist 'sources' offers. The registry carries one
+# entry per favourite alongside the real providers, and a queue pointed at one
+# of those is pointed at a single favourite rather than at a mix -- and DSTM's
+# own per-player setting will happily hold one, because that setting was not
+# written with this queue in mind.
+sub adopted {
+	my ( $class, $vClient ) = @_;
+
+	my $token = $class->stored($vClient);
+
+	return ( undef, 'NO_PROVIDER' ) unless $token;
+
+	my ( $ok, $err ) = $class->check( $vClient, $token );
+
+	return ( undef, $err ) unless $ok;
+
+	return ( $token, undef );
+}
+
+# What the player's own Dont Stop The Music setting says, or undef.
+#
+# Truthiness, not definedness: DSTM's own settings write the string '0' for
+# their "none" choice, and DSTM reads this back through `|| ''` -- so '0' is
+# false there, and it has to be false here too or we would go looking for a
+# provider literally named 0.
+sub stored {
+	my ( $class, $vClient ) = @_;
+
+	return unless $class->available;
+
+	return preferences('plugin.dontstopthemusic')->client($vClient)->get('provider') || undef;
+}
+
+# May a queue be pointed at this token? Returns ( $ok, $error ).
+#
+# Shared by adoption and by config, so that naming a provider and inheriting
+# one are judged by the same rule -- the registry carries one entry per
+# favourite alongside the real providers, and neither route should accept one.
+sub check {
+	my ( $class, $vClient, $token ) = @_;
+
+	return ( 0, 'DSTM_DISABLED' )        unless $class->available;
+	return ( 0, 'UNKNOWN_PROVIDER' )     unless $class->hasToken( $vClient, $token );
+	return ( 0, 'PROVIDER_NOT_OFFERED' ) unless $class->isOffered($token);
+
+	return ( 1, undef );
+}
+
+# Put a provider into the player's own setting.
+#
+# This writes another plugin's preference, which is deliberate: the queue and
+# the player are then set to the same provider, so the player keeps behaving
+# the way its queue does. It is also what makes a queue configurable without
+# going into LMS's UI.
+sub assign {
+	my ( $class, $vClient, $token ) = @_;
+
+	preferences('plugin.dontstopthemusic')->client($vClient)->set('provider', $token);
+
+	return 1;
 }
 
 # Resolve the record's provider and call it. $cb->($urls, $error) fires

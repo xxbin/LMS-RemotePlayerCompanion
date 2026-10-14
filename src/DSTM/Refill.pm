@@ -227,7 +227,7 @@ sub _step {
 
 	# The buffer itself is handed to the provider as its seed, so a provider
 	# that derives its selection from the current playlist sees this queue.
-	my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new( $playerid, $rec->{tracks} );
+	my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new( $playerid, Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) );
 
 	Plugins::RemotePlayerCompanion::DSTM::Provider->invoke( $rec, $vClient, sub {
 		my ( $urls, $err ) = @_;

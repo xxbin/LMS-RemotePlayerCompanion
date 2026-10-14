@@ -45,7 +45,7 @@ class ConcurrentTake(DSTMTestCase):
             r = self.lms.dstm("queue", self.playerid)
             seeds = {x["url"] for x in r.get("queue_loop") or []}
 
-            self.lms.dstm("config", self.playerid, f"token:{token}", f"max:{DEEP}")
+            self.use_provider(token, DEEP)
 
             handed, from_provider, saw_a_refill = [], 0, False
             started = time.time()

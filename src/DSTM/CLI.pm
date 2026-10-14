@@ -33,15 +33,28 @@ my $log = logger('plugin.remoteplayercompanion');
 # cannot drift apart.
 use constant DEFAULT_MAX => Plugins::RemotePlayerCompanion::DSTM::Queue::DEFAULT_MAX;
 
-use constant DEFAULT_COUNT => 20;
+# How many tracks 'nextbatch' hands out when the caller does not say.
+#
+# seed used to share this, so that the two commands' defaults were equal. It
+# no longer does: a seed's size comes from the queue's depth instead (see
+# cliSeed), because a seed only has to be enough for a provider to work from
+# and the right amount depends on how deep the queue is -- with the default
+# depth of 20 the two still come to the same 10.
+use constant DEFAULT_COUNT => 10;
 use constant MAX_COUNT     => 2000;
 use constant MAX_MAX       => 10000;
 use constant QUEUE_PAGE    => 50;
 
-# How many tracks 'seed' gives a queue with no starting point of its own.
-# Smaller than DEFAULT_COUNT on purpose: it only has to be enough for the
-# queue's own provider to work from, not enough to serve a caller.
-use constant SEED_COUNT => 10;
+# The track fields a list carries when the caller does not ask for any.
+#
+# Letters are LMS's own, from its tag map: 'y' year, 'd' duration, 't' track
+# number -- which is not the title, however easy that is to misread -- 'a'
+# artist, 'l' album, 'c' coverid. id and title come back whatever the tags say,
+# so they need no letter, and neither does url, which is set from the buffer.
+#
+# This is what a list carried before there was a tags parameter, plus coverid,
+# so that asking for nothing still gets no less than it used to.
+use constant DEFAULT_TAGS => 'ydtalc';
 
 # --- registration ---------------------------------------------------------
 
@@ -93,7 +106,8 @@ sub cliSources {
 
 	my $rec = Plugins::RemotePlayerCompanion::DSTM::Queue->load($playerid);
 
-	my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new( $playerid, $rec ? $rec->{tracks} : [] );
+	my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new( $playerid,
+		$rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) : [] );
 	my $current = ( $rec && $rec->{provider} ) ? $rec->{provider} : '';
 
 	# DSTM's registry is a grab bag: alongside the providers that generate a
@@ -132,6 +146,15 @@ sub cliSources {
 	return;
 }
 
+# Set a queue's depth, and optionally its provider. Optional entirely: seed
+# creates a queue with DEFAULT_MAX and adopts the player's provider, so a queue
+# that needs neither never calls this.
+#
+# Naming a provider here writes it **both** ways: into the record, and into the
+# player's own Dont Stop The Music setting. Both are sources -- seed adopts
+# whatever the player is set to, so a provider chosen in LMS works, and this
+# makes a provider chosen through the plugin work in LMS too. Neither is
+# privileged; the last one written is the one both sides read.
 sub cliConfig {
 	my $request = shift;
 
@@ -162,15 +185,20 @@ sub cliConfig {
 
 	if ( defined $token && length $token ) {
 
-		unless ( Plugins::RemotePlayerCompanion::DSTM::Provider->available ) {
-			return _fail( $request, 'DSTM_DISABLED', "Don't Stop The Music is not enabled" );
-		}
+		my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new(
+			$playerid, Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) );
 
-		my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new( $playerid, $rec->{tracks} );
+		# Checked before either is written, so a refused provider leaves both
+		# the queue and the player as they were.
+		my ( $ok, $err ) = Plugins::RemotePlayerCompanion::DSTM::Provider->check( $vClient, $token );
 
-		unless ( Plugins::RemotePlayerCompanion::DSTM::Provider->hasToken( $vClient, $token ) ) {
-			return _fail( $request, 'UNKNOWN_PROVIDER', "no such provider: $token" );
-		}
+		return _fail( $request, $err, _providerMessage( $err, $playerid ) ) unless $ok;
+
+		# The player first, then the record: if the second write fails the
+		# player is merely set to what was asked for, which is harmless, while
+		# the other order could leave a queue drawing from a provider the
+		# player is not set to.
+		Plugins::RemotePlayerCompanion::DSTM::Provider->assign( $vClient, $token );
 
 		$rec->{provider} = $token;
 	}
@@ -202,7 +230,7 @@ sub cliNextbatch {
 
 	unless ( $rec && $rec->{provider} ) {
 		return _fail( $request, 'NOT_CONFIGURED',
-			"no queue configured for $playerid; run config with a token first" );
+			"no queue for $playerid, or none with a provider adopted yet; run seed" );
 	}
 
 	my $count = _int( $request->getParam('count') );
@@ -214,13 +242,13 @@ sub cliNextbatch {
 	my $need  = $count < $rec->{max} ? $count : $rec->{max};
 	my $total = Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec);
 
-	if ( $total >= $need ) {
+	if ( $total > 0 ) {
 		return _serve( $request, $playerid, $count, $need );
 	}
 
-	# The buffer is short. Make sure something is being filled, then hold the
-	# request open until the fill satisfies us, gives up, or our own budget
-	# runs out.
+	# The buffer is empty, so there is nothing to return. Make sure something
+	# is being filled, then hold the request open until the fill satisfies us,
+	# gives up, or our own budget runs out.
 	Plugins::RemotePlayerCompanion::DSTM::Refill->ensure($playerid);
 
 	$request->setStatusProcessing;
@@ -267,7 +295,9 @@ sub cliQueue {
 
 	my @rows;
 	if ( $end >= $offset ) {
-		@rows = map { _trackInfo($_) } @{ $all }[ $offset .. $end ];
+		my $tags = _tags($request);
+
+		@rows = map { _trackInfo( $request, $_, $tags ) } @{ $all }[ $offset .. $end ];
 	}
 
 	$request->addResult( 'playerid', $playerid );
@@ -330,23 +360,28 @@ sub cliClear {
 	return;
 }
 
-# Give a queue a starting point.
+# Establish a queue: adopt its provider, and give it something to work from.
 #
-# A provider handed an empty queue is not merely unproductive, it can fail
-# outright. LastMix asks DSTM for the properties of whatever the queue holds,
-# and DSTM answers undef when there is nothing there -- which LastMix passes
-# to Storable::dclone without checking, and dies on. Since config leaves a
-# new queue empty, such a provider could not be used at all without this.
-# Nothing on our side can help: the seed tracks are exactly what is missing.
+# **The provider comes from the player, not from the caller.** DSTM keeps a
+# provider per player -- the one the user picked for that player in LMS -- and
+# this reads it, checks it against the same whitelist 'sources' offers, and
+# writes it into the record. config no longer names a provider, so this is the
+# step that makes a queue usable, and therefore the step that creates a queue
+# when there is none.
 #
-# Not every provider wants one. RatingsLight selects from the whole library
-# and works either way, and the PLUGIN_RANDOM_* family answers with a recipe
-# the plugin expands itself, so a queue pointed at those never needs seeding.
+# **A seed is not a curated selection.** A provider handed an empty queue is
+# not merely unproductive, it can fail outright: LastMix asks DSTM for the
+# properties of whatever the queue holds, DSTM answers undef when there is
+# nothing there, and LastMix passes that to Storable::dclone without checking.
+# The tracks come from the plugin's own selection rather than from the queue's
+# provider -- asking a provider that needs a seed to supply that seed is the
+# problem, not the solution -- and the queue's real provider takes over from
+# the very next fill.
 #
-# The tracks come from the plugin's own selection rather than from the
-# queue's provider: asking a provider that needs a seed to supply that seed
-# is the problem, not the solution. It is a starting point, not a curated
-# one, and the queue's real provider takes over from the very next fill.
+# Not every provider wants one: RatingsLight selects from the whole library,
+# and the PLUGIN_RANDOM_* family answers with a recipe the plugin expands
+# itself, so a queue pointed at those is fine with an empty buffer. They still
+# need this command, because it is what adopts the provider.
 sub cliSeed {
 	my $request = shift;
 
@@ -355,27 +390,69 @@ sub cliSeed {
 
 	my $rec = Plugins::RemotePlayerCompanion::DSTM::Queue->load($playerid);
 
-	unless ($rec) {
-		return _fail( $request, 'NOT_CONFIGURED',
-			"no queue configured for $playerid; run config first" );
+	my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new(
+		$playerid,
+		$rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) : [],
+	);
+
+	# Read and check before anything is written. A seed refused here has to
+	# leave the queue exactly as it was -- refusing must not be a way to
+	# unconfigure a queue that is already working.
+	my ( $token, $providerErr ) =
+		Plugins::RemotePlayerCompanion::DSTM::Provider->adopted($vClient);
+
+	return _fail( $request, $providerErr, _providerMessage( $providerErr, $playerid ) )
+		if $providerErr;
+
+	$rec ||= Plugins::RemotePlayerCompanion::DSTM::Queue->create($playerid);
+
+	$rec->{provider} = $token;
+
+	my ( $url, $urlErr, $urlMessage ) = _trackUrl($request);
+	return _fail( $request, $urlErr, $urlMessage ) if $urlErr;
+
+	# A named seed is a different operation from filling a buffer, so it
+	# returns here rather than falling through: the caller has said what the
+	# queue is *about*, not how much of it they want.
+	#
+	# It is applied even when the buffer is already full, which the early
+	# return further down would otherwise swallow -- an already-full queue
+	# would go on deriving from whatever it held before.
+	if ( defined $url ) {
+		Plugins::RemotePlayerCompanion::DSTM::Queue->setSeed( $rec, $url );
+		Plugins::RemotePlayerCompanion::DSTM::Queue->save($rec);
+		Plugins::RemotePlayerCompanion::DSTM::Refill->ensure($playerid);
+
+		return _respond( $request, $playerid, $rec, 0,
+			Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec), 1 );
 	}
 
-	my $count = _int( $request->getParam('count') );
-	$count = SEED_COUNT unless defined $count;
-	$count = 1         if $count < 1;
-	$count = MAX_COUNT if $count > MAX_COUNT;
+	# Half the queue's depth, rather than a number of its own. A seed only has
+	# to be enough for the provider to work from, and half leaves the other
+	# half for the tracks that provider is about to supply -- so the queue is
+	# not full of seeds before the provider has said anything.
+	my $target = int( $rec->{max} / 2 ) || 1;
 
 	my $have = Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec);
 
-	# Already has at least as much as it was asked for: nothing to do. This
+	# Saved before the early return below, so that seeding a queue which is
+	# already full still adopts a provider the player has changed since.
+	Plugins::RemotePlayerCompanion::DSTM::Queue->save($rec);
+
+	# Already has at least as much as it was asked for: nothing to add. This
 	# is what makes the command safe to call on a queue that is already
 	# running, rather than something a caller has to check first.
-	if ( $have >= $count ) {
-		return _respond( $request, $playerid, 0, $have, 0 );
+	if ( $have >= $target ) {
+		# Nothing to add, but the adoption above may have changed which
+		# provider the queue draws from, and it has to be drawing from that
+		# one now rather than whenever the buffer next happens to drain.
+		Plugins::RemotePlayerCompanion::DSTM::Refill->ensure($playerid);
+
+		return _respond( $request, $playerid, $rec, 0, $have, 0 );
 	}
 
 	my $urls = eval {
-		Plugins::RemotePlayerCompanion::DSTM::RandomPlay->expand( 'randomplay://track', $count - $have );
+		Plugins::RemotePlayerCompanion::DSTM::RandomPlay->expand( 'randomplay://track', $target - $have );
 	} || [];
 
 	unless ( scalar @{$urls} ) {
@@ -383,7 +460,7 @@ sub cliSeed {
 			'could not select any tracks to seed with; is RandomPlay available and the library populated?' );
 	}
 
-	my $added = Plugins::RemotePlayerCompanion::DSTM::Queue->add( $rec, $urls, $count );
+	my $added = Plugins::RemotePlayerCompanion::DSTM::Queue->add( $rec, $urls, $target );
 
 	Plugins::RemotePlayerCompanion::DSTM::Queue->save($rec);
 
@@ -392,16 +469,89 @@ sub cliSeed {
 	# is the point: it now has the seed that provider needed.
 	Plugins::RemotePlayerCompanion::DSTM::Refill->ensure($playerid);
 
-	return _respond( $request, $playerid, $added, Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec), 1 );
+	return _respond( $request, $playerid, $rec, $added,
+		Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec), 1 );
 }
 
+# The track a named seed refers to: ( $url, $error, $message ).
+#
+# No url and no id is not an error -- it is the request to fill a buffer, which
+# is what seed did before it could name a track, so all three come back empty
+# and the caller carries on.
+#
+# A URL that cannot be resolved is an error rather than something to ignore:
+# DSTM turns buffer URLs into tracks with objectForUrl, and a URL it cannot
+# resolve yields nothing, which for a provider deriving from the queue is the
+# same silent failure as an empty queue. Refusing says so out loud.
+sub _trackUrl {
+	my $request = shift;
+
+	my $url = $request->getParam('url');
+	my $id  = _int( $request->getParam('id') );
+
+	if ( defined $url && defined $id ) {
+		return ( undef, 'BAD_PARAMETER', 'give url: or id:, not both' );
+	}
+
+	return ( undef, undef, undef ) unless defined $url || defined $id;
+
+	# Both lookups already exist in DSTM/Tracks.pm; reuse rather than reinvent.
+	my $track = defined $id
+		? eval { Slim::Schema->resultset('Track')->find($id) }
+		: eval { Slim::Schema->objectForUrl($url) };
+
+	unless ( $track && $track->isa('Slim::Schema::Track') ) {
+		return ( undef, 'SEED_NOT_IN_LIBRARY',
+			'that track is not in the library, so no provider could derive from it' );
+	}
+
+	return ( $track->url, undef, undef );
+}
+
+# Say where to go, not only what is wrong. The setting lives in LMS, under the
+# player, and is not something this plugin can change for the user.
+sub _providerMessage {
+	my ( $code, $playerid ) = @_;
+
+	return "no Don't Stop The Music provider is set for $playerid; "
+		. "set one for that player in LMS, then run seed again"
+		if $code eq 'NO_PROVIDER';
+
+	return "the provider set for $playerid is not one Dont Stop The Music "
+		. "knows any more; pick another for that player in LMS"
+		if $code eq 'UNKNOWN_PROVIDER';
+
+	return "the provider set for $playerid is not one a queue can use: it is "
+		. "a single favourite rather than a mix. Run sources to see what can "
+		. "be used, and set one of those for the player in LMS"
+		if $code eq 'PROVIDER_NOT_OFFERED';
+
+	return "Don't Stop The Music is not enabled";
+}
+
+# Answer with the queue as it now stands, not only with what was added.
+#
+# seed is what establishes a queue -- it adopts the provider and creates the
+# record -- so its answer carries the same picture config's does, plus what
+# the seeding did. A caller that has just seeded should not have to ask again
+# to find out what it now has.
 sub _respond {
-	my ( $request, $playerid, $added, $total, $seeded ) = @_;
+	my ( $request, $playerid, $rec, $added, $total, $seeded ) = @_;
 
 	$request->addResult( 'playerid', $playerid );
+	$request->addResult( 'max',      $rec->{max} );
+	$request->addResult( 'provider', $rec->{provider} || '' );
 	$request->addResult( 'added',    $added );
 	$request->addResult( 'total',    $total );
 	$request->addResult( 'seeded',   $seeded );
+
+	# The track the queue is now building around, if one was named. Reported so
+	# that a caller can tell a seed that was taken from one that was ignored,
+	# which is otherwise invisible: a seed that never lands looks exactly like
+	# a queue that simply has not filled yet.
+	$request->addResult( 'seeded_track',
+		Plugins::RemotePlayerCompanion::DSTM::Queue->seed($rec)->[0] || '' );
+
 	$request->setStatusDone;
 
 	return;
@@ -424,7 +574,9 @@ sub _serve {
 	# Top the tail back up for the next caller.
 	Plugins::RemotePlayerCompanion::DSTM::Refill->ensure($playerid);
 
-	my @batch = map { _trackInfo($_) } @{$urls};
+	my $tags = _tags($request);
+
+	my @batch = map { _trackInfo( $request, $_, $tags ) } @{$urls};
 
 	# 'complete' answers the caller's request, so it compares against the
 	# requested count -- not against $need, which is clamped to max purely to
@@ -454,24 +606,41 @@ sub _addLoop {
 	return scalar @{$items};
 }
 
+# The tag letters the caller asked for, or the default.
+#
+# Deliberately not checked against LMS's map: an unrecognised letter is skipped
+# by that map rather than being an error, and a second copy of the letter list
+# here would be a second copy to keep in step.
+sub _tags {
+	my $request = shift;
+
+	my $tags = $request->getParam('tags');
+
+	return DEFAULT_TAGS unless defined $tags && length $tags;
+
+	return $tags;
+}
+
+# One entry of a track list.
 sub _trackInfo {
-	my ($url) = @_;
-	my $info = { url => $url };
+	my ( $request, $url, $tags ) = @_;
 
-	my $obj = eval { Slim::Schema->objectForUrl($url) };
+	# LMS's own machinery, rather than a mapping of our own: a tag letter means
+	# here exactly what it means to songinfo, and a field LMS adds to its map
+	# turns up here without any work.
+	#
+	# Wrapped in eval because _songData reaches for the request's client when a
+	# track is remote, and these commands are registered with no client. A
+	# track we cannot describe is still a track the caller can play, so it
+	# comes back with its url alone rather than taking the whole answer down.
+	my $info = eval { Slim::Control::Queries::_songData( $request, $url, $tags, 1 ) };
 
-	return $info unless blessed $obj;
+	return { url => $url } unless $info && ref $info eq 'HASH';
 
-	for my $field (qw(id title year duration tracknum)) {
-		my $value = eval { $obj->$field };
-		$info->{$field} = $value if defined $value;
-	}
-
-	my $artist = eval { $obj->artist };
-	$info->{artist} = eval { $artist->name } if blessed $artist;
-
-	my $album = eval { $obj->album };
-	$info->{album} = eval { $album->name } if blessed $album;
+	# The url the buffer handed out, not the one the database holds. They can
+	# differ -- a cue sheet gives a url a #start-end suffix -- and it is the
+	# buffer's that the player has to be able to fetch.
+	$info->{url} = $url;
 
 	return $info;
 }
