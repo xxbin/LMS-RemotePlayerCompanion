@@ -22,6 +22,68 @@ All of these are registered with `needsClient = 0`, and carry the queue in the
 | `status playerid:<id>` | Queue metadata, including whether a fill is running | no |
 | `clear playerid:<id>` | Empties the buffer | no |
 
+## The order to call them in
+
+Two things are needed and everything else is optional or a repeat: **a provider
+for the player**, and **one `seed`**. `seed` is what adopts the provider and
+creates the queue, so until it has run there is nothing for the other commands
+to act on.
+
+| | Step | |
+|---|---|---|
+| 0 | `sources playerid:<id>` | optional — what there is to point a queue at |
+| 1 | Give the player a provider: set one for it in LMS's Dont Stop The Music settings, **or** name one with `config token:<T>` | **required, once** |
+| 2 | `config playerid:<id> [max:<N>]` | optional — buffer depth, 20 unless said |
+| 3 | `seed playerid:<id> [url:<u> \| id:<n>]` | **required, once** — creates the queue |
+| 4 | `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | the loop — call it whenever the player wants more |
+| 5 | `queue`, `status` | optional, any time — both read-only |
+| 6 | `clear playerid:<id>` | optional — empties the buffer |
+
+With the player already set to a provider in LMS, the shortest path that works
+is two calls, and `config` is not one of them:
+
+```
+["", ["remoteplayercompanion", "dstm", "seed",      "playerid:02:00:79:b3:5d:7c"]]
+["", ["remoteplayercompanion", "dstm", "nextbatch", "playerid:02:00:79:b3:5d:7c", "count:20"]]
+```
+
+**Skipping step 1** answers `NO_PROVIDER`, and says where to set one. **Skipping
+step 3** answers `NOT_CONFIGURED` from everything else, because seeding is what
+creates the queue in the first place — `nextbatch` on a queue nobody has seeded
+has nothing to draw from, not even an empty one.
+
+### After that it is a loop
+
+`nextbatch` takes from the front of the buffer and refills the tail in the
+background, so it is called again and again and there is nothing to re-arm
+between calls. It answers at once with whatever the buffer holds, however short
+of `count` that falls; `complete` says whether the count was met. It waits only
+when the buffer is empty, since then there is nothing to return at all.
+
+`config` does not have to be called again either. Its depth persists in the
+queue record, across restarts.
+
+### Seed again when the player's provider changes
+
+The provider is a **snapshot**: a queue goes on drawing from the one it adopted
+until something adopts another. Changing the provider in LMS does not reach a
+running queue. `seed` again — with or without a track — is what picks up a
+change, and it also refreshes the queue's derivation material.
+
+That makes `seed` safe to call on a queue that is already running, though its
+two modes are safe for different reasons. A seed that **names a track** replaces
+the previous one rather than adding to it — "I am playing this now" is about the
+present. A seed that **names nothing** only fills the buffer up to half the
+queue's depth, and leaves a queue that already holds that much alone. Either way
+re-seeding to pick up a provider change disturbs nothing else.
+
+### What each step can fail with
+
+`NO_PROVIDER` and the provider refusals are step 1's; `BAD_MAX` is step 2's;
+`SEED_NOT_IN_LIBRARY` is step 3's, and `NO_SEED_AVAILABLE` is step 3 without a
+track when the plugin can find nothing to seed with. The rest are in
+[Errors](#errors).
+
 ## Parameters
 
 | Parameter | Used by | Default | Notes |
