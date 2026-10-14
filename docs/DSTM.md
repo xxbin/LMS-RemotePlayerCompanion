@@ -17,7 +17,7 @@ All of these are registered with `needsClient = 0`, and carry the queue in the
 | `sources playerid:<id> [all:<0\|1>]` | Lists the DSTM providers worth pointing a queue at | no |
 | `seed playerid:<id> [url:<u> \| id:<n>]` | Establishes a queue: adopts the player's provider, and gives it something to work from | no |
 | `config playerid:<id> [token:<T>] [max:<N>]` | Sets the queue's depth, and optionally its provider. Optional — `seed` creates a queue without it | no |
-| `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | Hands out the front of the buffer and refills the tail | only if the buffer is short |
+| `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | Hands out the front of the buffer and refills the tail | only when the buffer is empty |
 | `queue playerid:<id> [offset:<N>] [count:<N>] [tags:<letters>]` | Reads the buffer without consuming it | no |
 | `status playerid:<id>` | Queue metadata, including whether a fill is running | no |
 | `clear playerid:<id>` | Empties the buffer | no |

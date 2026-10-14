@@ -2,9 +2,21 @@
 
 An LMS plugin that provides the server-side services a cached/offline remote
 player needs in order to work away from the server: dynamic playlists,
-playback information sync, favourites sync, and the like.
+playback information sync, favourites sync, and more.
 
-A cached/offline remote player keeps a music library’s audio files on a mobile device ahead of time—by syncing or downloading them—and then plays them locally. Its purpose is to keep playback going on an unreliable mobile network. This plugin is only the server-side half of that setup: it provides such a player with what it needs from the server, such as the dynamic playlist to work through, playback history batches to report back, and favourites to keep in sync.
+To install it, add this repository in LMS's plugin settings:
+
+```
+https://xxbin.github.io/LMS-RemotePlayerCompanion/repo.xml
+```
+
+A cached/offline remote player keeps a music library's audio files on a mobile
+device ahead of time — by syncing or downloading them — and then plays them
+locally. Its purpose is to keep playback going on an unreliable mobile network.
+This plugin is only the server-side half of that setup: it provides such a
+player with what it needs from the server, such as the dynamic playlist to work
+through, playback history batches to report back, and favourites to keep in
+sync.
 
 It speaks LMS's own protocols, offering an LMS-style JSON-RPC and CLI
 interface. The separate functions are provided as separate subcommands, and
@@ -17,13 +29,13 @@ Commands are `remoteplayercompanion <family> <action>`, so a family can be
 added without disturbing the others. Each family is a directory under the
 plugin, and registers its own commands.
 
-| Family | For | Status |
+| Family | What it is for | Status |
 |---|---|---|
 | [`dstm`](#the-dstm-family) | What to play next: a rolling queue filled from Dont Stop The Music providers | implemented |
-| `convert` | What the player can play: the server's transcoding and format support, as it applies to a remote player | planned |
-| `history` | Playback history, so listening done offline can be reported back | planned |
-| `favorites` | Favourites, kept in step in both directions | planned |
-| `rating` | Track ratings, likewise | planned |
+| `convert` | What the player can play: the server's transcoding and format support | planned |
+| `history` | What the player has played: listening done offline, reported back to the server | planned |
+| `favorites` | Favourites: the server's and the player's, kept in step in both directions | planned |
+| `rating` | Track ratings: the server's and the player's, kept in step in both directions | planned |
 
 Only `dstm` exists today. The others are listed so the shape of the plugin is
 clear, not because anything is stubbed out for them.
