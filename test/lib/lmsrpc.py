@@ -69,6 +69,24 @@ class LMS:
         except ValueError:
             return {"_error": f"unparsable response: {raw[:200]}"}
 
+    def fetch(self, path, timeout=30):
+        """Fetch a page from the server, or None if it cannot be had.
+
+        The settings pages are HTML rather than JSON-RPC, and a few things
+        about the plugin are only visible there -- above all whether its
+        logging category is one LMS offers, which no query answers. None
+        rather than an exception, because a server reachable over JSON-RPC may
+        still want a login for its settings, and that is a skip, not a fault.
+        """
+        base = self.url.rsplit("/jsonrpc.js", 1)[0]
+        try:
+            with urllib.request.urlopen(base + path, timeout=timeout) as resp:
+                if resp.status != 200:
+                    return None
+                return resp.read().decode("utf-8", "replace")
+        except (urllib.error.URLError, OSError):
+            return None
+
     # The plugin's own commands, so a suite need not repeat the prefix.
 
     def dstm(self, action, playerid, *params, timeout=90):
@@ -141,6 +159,14 @@ SEED_TOKEN = "PLUGIN_RANDOM_TRACK"
 #: suite needs a real player to test against at all.
 DSTM_PROVIDER_PREF = "plugin.dontstopthemusic:provider"
 
+#: The plugin's own logging category. Everything it logs goes under this one
+#: name, and the suites turn it up for their duration -- see set_debug_level.
+LOG_CATEGORY = "plugin.remoteplayercompanion"
+
+#: What the suites leave the category at. ERROR is the plugin's own default, so
+#: a run against somebody's server ends where it started.
+LEVEL_OFF = "ERROR"
+
 #: The player the suites drive. Taken from the environment, else discovered.
 #: Never hardcoded: this repository is public and a MAC address is a device.
 PLAYER = os.environ.get("LMS_PLAYER") or None
@@ -175,6 +201,27 @@ def restore_provider(lms, playerid):
     """Put a player's provider back, or to DSTM's 'none' if it had none."""
     if playerid in _PROVIDER_ORIGINAL:
         lms.set_provider(playerid, _PROVIDER_ORIGINAL[playerid] or "0")
+
+
+def set_debug_level(lms, level):
+    """Set the plugin's own logging level. True if the server took it.
+
+    The suites turn this to DEBUG for their duration, and that is not
+    decoration. A logger builds its message only when its level admits one, so
+    with the category at its default the plugin's debug lines never run -- and
+    a fault inside one of them, such as a value stringified on its way into an
+    answer, cannot fail anything. Raising the level is what puts them under the
+    suite, and one such fault has already been caught this way.
+
+    LMS has no query that reads a level back, so what is left behind at the end
+    is LEVEL_OFF and not whatever was there before. Stated rather than guessed
+    at.
+    """
+    r = lms.call(["debug", LOG_CATEGORY, level])
+
+    # An accepted 'debug' answers with an empty result; a refused one closes
+    # the socket with no body at all, which is the _error below.
+    return not r.get("_error") and not r.get("error")
 
 
 def require_player(lms):
@@ -234,12 +281,25 @@ class DSTMTestCase(unittest.TestCase):
                 f"{SEED_TOKEN} is not registered, so no queue can be seeded "
                 "(is RandomPlay enabled?)")
 
+        # Last, so that nothing above has been turned up before a skip that
+        # would leave it turned up. A server whose plugin does not offer the
+        # category is one whose debug lines cannot be tested at all, which is
+        # a reason to skip rather than to run and quietly cover less.
+        if not set_debug_level(cls.lms, "DEBUG"):
+            raise unittest.SkipTest(
+                f"cannot set the logging category {LOG_CATEGORY}, so the "
+                "plugin's debug lines would not be under test")
+
     @classmethod
     def tearDownClass(cls):
         # Unconditionally, and against the value remembered for this player
         # rather than this class: the common original state is *no* provider,
         # which is falsy, and a class that skipped has no captured value at all.
         restore_provider(cls.lms, cls.playerid)
+
+        # And the logging category back to the level a healthy server has it
+        # at. Not "restored", which would need a query LMS does not have.
+        set_debug_level(cls.lms, LEVEL_OFF)
 
     @classmethod
     def use_provider(cls, token, max_depth=None):

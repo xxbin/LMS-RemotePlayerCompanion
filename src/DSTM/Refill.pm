@@ -98,6 +98,18 @@ sub ensure {
 		empty   => 0,
 	};
 
+	# What this fill is for and what it starts from. Without it the turns below
+	# arrive with nothing saying whose they are or what they are aiming at.
+	if ( main::DEBUGLOG && $log->is_debug ) {
+		my $rec = Plugins::RemotePlayerCompanion::DSTM::Queue->load($playerid);
+
+		$log->debug( "fill start: $playerid provider="
+			. ( $rec && $rec->{provider} ? $rec->{provider} : 'none' )
+			. ' target=' . ( $rec ? 0 + $rec->{max} : 0 )
+			. ' buffered=' . ( $rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) : 0 )
+			. ' max_calls=' . MAX_CALLS . ' budget=' . FILL_BUDGET . 's' );
+	}
+
 	# The one bound on a fill. Without it, a provider that accepts the
 	# callback and never calls it would leave the queue's fill gate closed
 	# forever, and every later fill for this queue would be refused.
@@ -373,6 +385,17 @@ sub _finish {
 		}
 	}
 
+	# Why it ended, which is the question a queue that is not filling raises.
+	# 'done' is not a failure: it is the target met, the call allowance spent,
+	# or a provider that kept answering with tracks the queue already held.
+	if ( main::DEBUGLOG && $log->is_debug ) {
+		my $rec = Plugins::RemotePlayerCompanion::DSTM::Queue->load($playerid);
+
+		$log->debug( "fill end: $playerid reason=" . ( defined $err ? $err : 'done' )
+			. ' calls=' . $st->{calls}
+			. ' buffered=' . ( $rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) : 0 ) );
+	}
+
 	$class->_notify($playerid);
 
 	delete $state{$playerid};
@@ -396,6 +419,11 @@ sub abandon {
 
 	undef $st->{budget} if $st->{budget};
 	undef $st->{tick}   if $st->{tick};
+
+	# No last_error and no save: 'clear' and 'forget' call this, and a queue
+	# somebody has just emptied or dropped must not be written back to.
+	main::DEBUGLOG && $log->is_debug
+		&& $log->debug("fill abandon: $playerid stopped without recording an error");
 
 	for my $w ( @{ $st->{waiters} } ) {
 		next if $w->{done};

@@ -16,7 +16,21 @@ use Slim::Utils::PluginManager;
 
 use Plugins::RemotePlayerCompanion::DSTM::CLI;
 
-my $log = logger('plugin.remoteplayercompanion');
+# Logging, registered rather than merely created.
+#
+# LMS's logging settings offer *categories*, and a category is registered by
+# asking for one. A plain logger('plugin.remoteplayercompanion') gives a
+# logger that works and a category LMS has never heard of: the plugin logs,
+# and cannot be turned up from the settings page, with nothing to say why.
+# Every plugin that ships with LMS registers its category this way.
+#
+# The modules below go on calling logger() -- once the category is
+# registered, that is the same logger, and this is where it is registered.
+my $log = Slim::Utils::Log->addLogCategory({
+	'category'     => 'plugin.remoteplayercompanion',
+	'defaultLevel' => 'ERROR',
+	'description'  => 'PLUGIN_REMOTEPLAYERCOMPANION_NAME',
+});
 
 # No $VERSION here, deliberately.
 #

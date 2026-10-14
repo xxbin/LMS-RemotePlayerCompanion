@@ -126,6 +126,26 @@ class Seed(DSTMTestCase):
 
         self.assertEqual((r.get("error") or {}).get("code"), "SEED_NOT_IN_LIBRARY")
 
+    def test_a_refused_seed_leaves_no_queue_behind(self):
+        """Refusing must not be a way to half-configure a queue. A seed that
+        cannot be resolved answers SEED_NOT_IN_LIBRARY and leaves nothing at
+        all -- not even the record it would have created had it got that far.
+
+        The same has to hold for the NO_SEED_AVAILABLE refusal, which is the
+        one that used to create the record before refusing, and which cannot be
+        reached on a server whose RandomPlay works. This is the reachable
+        refusal, so it is the one that can carry the property."""
+        self.lms.dstm("forget", self.playerid)
+
+        if not self.lms.set_provider(self.playerid, SEED_TOKEN):
+            self.skipTest(f"cannot set the DSTM provider for {self.playerid}")
+
+        r = self.lms.dstm("seed", self.playerid, "url:file:///nope/not-a-track.mp3")
+
+        self.assertEqual((r.get("error") or {}).get("code"), "SEED_NOT_IN_LIBRARY")
+        self.assertEqual(self.lms.status(self.playerid).get("configured"), 0,
+                         "a refused seed left a queue behind")
+
     def test_seed_without_a_provider_is_refused(self):
         """seed no longer refuses an unconfigured queue -- configuring is what
         it does. What it refuses is a player with nothing to adopt."""

@@ -151,6 +151,21 @@ sub add {
 
 	$class->_pruneSeen($seen) if scalar( keys %{$seen} ) > SEEN_HARD;
 
+	# What went in and what that leaves. The caller logs its own view of a
+	# turn (see Refill), but a buffer can be appended to from more than one
+	# place, and this is the one that sees every append.
+	#
+	# `0 + $added` rather than `$added`: interpolating a scalar marks it as a
+	# string, and this one is returned to a caller and goes into an answer, so
+	# the mark would turn 25 into "25" on the wire. Arithmetic makes a new
+	# scalar, which the interpolation may mark instead.
+	main::DEBUGLOG && $log->is_debug && $log->debug(
+		'buffer add: ' . ( $rec->{playerid} || '?' )
+		. ' offered=' . scalar( @{ $urls || [] } )
+		. " added=" . ( 0 + $added ) . " buffered=" . scalar( @{ $rec->{tracks} || [] } )
+		. ( defined $limit ? " limit=$limit" : '' )
+	);
+
 	return $added;
 }
 
@@ -161,9 +176,22 @@ sub take {
 
 	my $tracks = $rec->{tracks} ||= [];
 
+	my $wanted = $count;
+
 	$count = scalar @{$tracks} if $count > scalar @{$tracks};
 
-	return [ splice @{$tracks}, 0, $count ];
+	my $taken = [ splice @{$tracks}, 0, $count ];
+
+	# Consumption is the half of the buffer's life nothing else reports: a
+	# queue that empties faster than it fills looks the same from the outside
+	# whether the provider is slow or the caller is taking too much.
+	main::DEBUGLOG && $log->is_debug && $log->debug(
+		'buffer take: ' . ( $rec->{playerid} || '?' )
+		. " wanted=$wanted got=" . scalar( @{$taken} )
+		. ' left=' . scalar( @{$tracks} )
+	);
+
+	return $taken;
 }
 
 sub clear {
@@ -173,6 +201,13 @@ sub clear {
 
 	$rec->{tracks} = [];
 	$rec->{seen}   = {};
+
+	# The dedup memory goes with it, which is worth saying: a cleared queue may
+	# hand out tracks it has already served, and nothing else would explain it.
+	main::DEBUGLOG && $log->is_debug && $log->debug(
+		'buffer clear: ' . ( $rec->{playerid} || '?' )
+		. " dropped=" . ( 0 + $removed ) . " (dedup memory dropped too)"
+	);
 
 	return $removed;
 }

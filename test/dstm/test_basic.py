@@ -7,7 +7,7 @@ import time
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lib"))
-from lmsrpc import DSTMTestCase, SEED_TOKEN, wait_for_count  # noqa: E402
+from lmsrpc import DSTMTestCase, LMS, SEED_TOKEN, wait_for_count  # noqa: E402
 
 
 def code_of(result):
@@ -263,6 +263,31 @@ class Invisibility(DSTMTestCase):
         self.assertIn(self.playerid, after,
                       "the queue's player is not one LMS knows, so its "
                       "provider could not have been adopted")
+
+
+class Logging(unittest.TestCase):
+    """The plugin's logger has to be listed where it can be turned on.
+
+    LMS's logging settings offer *categories*, and a category is registered by
+    asking for one -- `Slim::Utils::Log->addLogCategory`. Creating a logger
+    with `logger()` alone gives a logger that works and a category LMS has
+    never heard of, so the plugin logs and cannot be turned up from the UI. It
+    is an easy mistake and an invisible one, which is why it is checked.
+
+    Not a DSTMTestCase: none of this needs a player, a provider or a queue, and
+    it is the plugin rather than a command family that is being checked.
+    """
+
+    def test_the_logging_settings_offer_the_plugins_category(self):
+        page = LMS().fetch("/settings/server/debugging.html")
+
+        if page is None:
+            self.skipTest("the settings page is not reachable without a login")
+
+        # `in` rather than assertIn: the page is 70KB, and assertIn prints all
+        # of it. A failure here should say what is wrong, not bury it.
+        self.assertTrue('name="plugin.remoteplayercompanion"' in page,
+                        "LMS's logging settings do not offer the plugin's category")
 
 
 if __name__ == "__main__":

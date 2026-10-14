@@ -141,6 +141,16 @@ sub cliSources {
 		};
 	}
 
+	# How much the filtered view left out, which is the number a user pointing
+	# at a missing provider wants: 179 hidden entries is why the one they meant
+	# is not in the list they are reading.
+	main::DEBUGLOG && $log->is_debug && $log->debug(
+		"sources $playerid: offered " . scalar(@sources)
+			. " hidden=" . ( 0 + $hidden )
+			. ' unfiltered=' . ( $showAll ? 'yes' : 'no' )
+			. ' selected=' . ( length $current ? $current : 'none' )
+	);
+
 	$request->addResult( 'playerid', $playerid );
 	$request->addResult( 'selected_provider', $current );
 	$request->addResult( 'count', _addLoop( $request, 'sources_loop', \@sources ) );
@@ -237,6 +247,12 @@ sub cliNextbatch {
 	# that cannot do is invent a provider, so a player with none set in LMS is
 	# still refused, with NO_PROVIDER naming the setting to go and make.
 	unless ( $rec && $rec->{provider} ) {
+		main::DEBUGLOG && $log->is_debug && $log->debug(
+			"nextbatch $playerid: nothing to serve from"
+				. ( $rec ? ' (a queue with no provider)' : ' (no queue)' )
+				. '; establishing one'
+		);
+
 		my ( undef, $fail, $message ) = _establish( $request, $playerid );
 
 		return _fail( $request, $fail, $message ) if $fail;
@@ -452,26 +468,44 @@ sub _establish {
 	my ( $token, $providerErr ) =
 		Plugins::RemotePlayerCompanion::DSTM::Provider->adopted($vClient);
 
-	return ( 0, $providerErr, _providerMessage( $providerErr, $playerid ) )
-		if $providerErr;
+	if ($providerErr) {
+		main::DEBUGLOG && $log->is_debug
+			&& $log->debug("seed $playerid: no provider to adopt ($providerErr)");
+
+		return ( 0, $providerErr, _providerMessage( $providerErr, $playerid ) );
+	}
+
+	# **The token, which a caller cannot see from anywhere else.** A queue draws
+	# from the provider the *player* was set to when it was seeded, and goes on
+	# drawing from it after that setting changes, so the queue's provider and
+	# the player's can differ. This is the only line that says which one this
+	# queue actually took.
+	main::DEBUGLOG && $log->is_debug
+		&& $log->debug("seed $playerid: adopted provider $token");
 
 	my ( $url, $urlErr, $urlMessage ) = _trackUrl($request);
-	return ( 0, $urlErr, $urlMessage ) if $urlErr;
 
-	# Built in memory from here, and not written until the whole thing has
-	# succeeded, so that the refusal below still leaves the queue as it was.
-	$rec ||= Plugins::RemotePlayerCompanion::DSTM::Queue->create($playerid);
+	if ($urlErr) {
+		main::DEBUGLOG && $log->is_debug
+			&& $log->debug("seed $playerid: refused, $urlErr");
 
-	$rec->{provider} = $token;
+		return ( 0, $urlErr, $urlMessage );
+	}
 
 	# Half the queue's depth, rather than a number of its own. A seed only has
 	# to be enough for the provider to work from, and half leaves the other
 	# half for the tracks that provider is about to supply -- so the queue is
 	# not full of seeds before the provider has said anything.
-	my $target = int( $rec->{max} / 2 ) || 1;
+	#
+	# Taken from the depth a queue would be created with if this call is the one
+	# that creates it, so that the size of a seed does not depend on the record
+	# existing before the seed has been found.
+	my $target = int( ( $rec ? $rec->{max} : DEFAULT_MAX ) / 2 ) || 1;
 
-	# The replacement material is obtained before the old is dropped, so that
-	# failing to find any leaves a working queue working.
+	# The replacement material is obtained before anything is dropped or
+	# written, so that failing to find any leaves the queue exactly as it was.
+	# That includes there being no queue to leave: creating one is a write, and
+	# it must not happen while something else can still refuse.
 	my $urls = [];
 
 	unless ( defined $url ) {
@@ -480,10 +514,20 @@ sub _establish {
 		} || [];
 
 		unless ( scalar @{$urls} ) {
+			main::DEBUGLOG && $log->is_debug
+				&& $log->debug("seed $playerid: nothing could be selected to seed with (NO_SEED_AVAILABLE)");
+
 			return ( 0, 'NO_SEED_AVAILABLE',
 				'could not select any tracks to seed with; is RandomPlay available and the library populated?' );
 		}
 	}
+
+	# Nothing above could have written anything, and nothing below refuses.
+	$rec ||= Plugins::RemotePlayerCompanion::DSTM::Queue->create($playerid);
+
+	$rec->{provider} = $token;
+
+	my $dropped = Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec);
 
 	Plugins::RemotePlayerCompanion::DSTM::Queue->clear($rec);
 	$rec->{seed} = [];
@@ -501,6 +545,17 @@ sub _establish {
 	}
 
 	Plugins::RemotePlayerCompanion::DSTM::Queue->save($rec);
+
+	# What the seed did, in one line: which way it went, how much it dropped to
+	# get there, and what the queue holds now.
+	main::DEBUGLOG && $log->is_debug && $log->debug(
+		"seed $playerid: "
+			. ( defined $url
+				? "built around $url"
+				: "filled " . ( 0 + $added ) . " of $target from the plugin's own selection" )
+			. ", dropped $dropped"
+			. ', buffered=' . Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec)
+	);
 
 	# Seeding is a change to the buffer like any other, so from here the queue
 	# tops itself up from its own provider in the ordinary way -- which is the
@@ -641,6 +696,17 @@ sub _serve {
 	$request->addResult( 'total',    Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) );
 	$request->addResult( 'source',   $rec->{provider} || '' );
 	$request->addResult( 'filling',  Plugins::RemotePlayerCompanion::DSTM::Refill->isFilling($playerid) );
+
+	# What the caller got, what is left, and whether the tail is being refilled
+	# -- the three numbers that say whether a queue is keeping up with its
+	# player or quietly falling behind.
+	main::DEBUGLOG && $log->is_debug && $log->debug(
+		"nextbatch $playerid: handed out " . scalar(@batch) . " of $count asked for"
+			. ', buffered=' . Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec)
+			. ', source=' . ( $rec->{provider} || 'none' )
+			. ', filling=' . Plugins::RemotePlayerCompanion::DSTM::Refill->isFilling($playerid)
+	);
+
 	$request->setStatusDone;
 
 	return;

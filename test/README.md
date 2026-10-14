@@ -43,6 +43,7 @@ test/
 │   └── test_package.py         the zip's shape, its sha, and the listing
 └── dstm/                       the 'remoteplayercompanion dstm *' family
     ├── test_basic.py           the ordinary paths and the error paths
+    ├── test_bootstrap.py       establishing a queue from nothing, and over
     ├── test_sources.py         offers every listed provider one, and measures
     ├── test_async_delivery.py  a provider answering later still gets its tracks in
     ├── test_fill_timeout.py    a stuck fill is cut off, its late result dropped
@@ -81,12 +82,20 @@ worth knowing before running these against a server you care about:
   `prefs/plugin/dontstopthemusic.prefs` on the server.
 - **Two runs against one server collide**, because they share one player's
   queue. They used to be isolated by giving each run its own queue name.
+- **The suites turn the plugin's own logging up**, to DEBUG for their duration.
+  A logger builds its message only when its level admits one, so with the
+  category at its default the plugin's debug lines never run — and a fault
+  inside one of them, such as a value stringified on its way into an answer,
+  cannot fail anything. The level is server-wide and LMS has no query that
+  reads one back, so `tearDownClass` sets it to `ERROR`, the plugin's own
+  default, rather than to whatever it was before. The run's output lands in the
+  server's `server.log`.
 
 `LMS_PLAYER` names the player to drive. Without it, the first player LMS
 reports is used. **No player id is ever hardcoded here** — this repository is
 public, and a MAC address is somebody's device.
 
-Expect **around three and a half minutes** against a real server: 56 tests, of which 35
+Expect **around three and a half minutes** against a real server: 74 tests, of which 53
 drive a server and most of those wait on fills that take a second or two; the
 other 21 are the packaging suite, which finishes before you notice it. Two
 thirds of the time is

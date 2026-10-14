@@ -108,7 +108,15 @@ sub adopted {
 
 	my $token = $class->stored($vClient);
 
-	return ( undef, 'NO_PROVIDER' ) unless $token;
+	unless ($token) {
+		# Stated neutrally on purpose: stored() also answers undef when Dont
+		# Stop The Music is not enabled at all, so this is "nothing came back"
+		# rather than "nothing was set".
+		main::DEBUGLOG && $log->is_debug
+			&& $log->debug( 'no provider adopted for ' . $vClient->id . ' (NO_PROVIDER)' );
+
+		return ( undef, 'NO_PROVIDER' );
+	}
 
 	my ( $ok, $err ) = $class->check( $vClient, $token );
 
@@ -139,9 +147,27 @@ sub stored {
 sub check {
 	my ( $class, $vClient, $token ) = @_;
 
-	return ( 0, 'DSTM_DISABLED' )        unless $class->available;
-	return ( 0, 'UNKNOWN_PROVIDER' )     unless $class->hasToken( $vClient, $token );
-	return ( 0, 'PROVIDER_NOT_OFFERED' ) unless $class->isOffered($token);
+	# Each refusal says so, with the token in it. This is the answer to "why
+	# will my queue not take the provider I picked", and from outside the three
+	# refusals are indistinguishable: every one of them is a queue that will
+	# not fill.
+	unless ( $class->available ) {
+		main::DEBUGLOG && $log->is_debug
+			&& $log->debug("provider $token refused: Dont Stop The Music is not enabled");
+		return ( 0, 'DSTM_DISABLED' );
+	}
+
+	unless ( $class->hasToken( $vClient, $token ) ) {
+		main::DEBUGLOG && $log->is_debug
+			&& $log->debug("provider $token refused: Dont Stop The Music does not know it");
+		return ( 0, 'UNKNOWN_PROVIDER' );
+	}
+
+	unless ( $class->isOffered($token) ) {
+		main::DEBUGLOG && $log->is_debug
+			&& $log->debug("provider $token refused: it is a single favourite rather than a mix");
+		return ( 0, 'PROVIDER_NOT_OFFERED' );
+	}
 
 	return ( 1, undef );
 }
