@@ -2,11 +2,12 @@
 """The default queue depth, the default batch size, and what 'seed' does.
 
 Both defaults are exercised by leaving the parameter off, rather than by
-reading them out of the source. seed is checked for the things that make it
-safe to call -- it fills an empty queue, it leaves a queue that already holds
-enough alone -- and for the two things a named seed has to do: keep the named
-track out of the player's hands, and refuse a track no provider could derive
-from.
+reading them out of the source. seed is checked for the two things a named
+seed has to do -- keep the named track out of the player's hands, and refuse a
+track no provider could derive from -- and for what it has to refuse.
+
+What seed does to a queue that already holds something is not here: it
+rebuilds rather than tops up, which is test_bootstrap.py's subject.
 """
 
 import os
@@ -58,29 +59,28 @@ class Seed(DSTMTestCase):
 
         r = self.lms.dstm("seed", self.playerid)
         self.assertGreater(r.get("added", 0), 0)
-        self.assertEqual(r.get("seeded"), 1)
 
-    def test_seed_leaves_a_queue_that_already_holds_enough_alone(self):
-        self.lms.clear(self.playerid)
-        first = self.lms.dstm("seed", self.playerid)
-        self.assertGreater(first.get("added", 0), 0)
+    def test_seed_reports_no_seeded_flag(self):
+        """'seeded' said whether the call had anything to do, which mattered
+        while seed could decline to do it. It cannot decline any more -- it
+        always starts the queue over -- so the flag was a constant, and a
+        constant in a response is a field every caller has to read once to
+        find out it never varies.
+        """
+        self.use_provider(SEED_TOKEN)
 
-        again = self.lms.dstm("seed", self.playerid)
-        self.assertEqual(again.get("added"), 0)
-        self.assertFalse(again.get("seeded"), "it reported seeding an already seeded queue")
+        r = self.lms.dstm("seed", self.playerid)
+
+        self.assertNotIn("seeded", r)
 
     def test_seed_fills_to_half_the_queue_depth(self):
         """A seed only has to be enough for a provider to work from. Half
         leaves the other half for the tracks that provider is about to supply,
         rather than filling the queue with seeds before it has said anything.
-
-        The queue is settled first: config starts a fill of its own, and a
-        buffer that is already full would take the early return instead.
         """
         self.use_provider(SEED_TOKEN, 40)
         wait_for_fill(self.lms, self.playerid, 30)
 
-        self.lms.dstm("clear", self.playerid)
         r = self.lms.dstm("seed", self.playerid)
 
         self.assertEqual(r.get("added"), 20, "seed did not fill to half of max:40")

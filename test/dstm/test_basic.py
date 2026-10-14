@@ -26,9 +26,14 @@ class Refusals(DSTMTestCase):
         r = self.lms.status("no-such-player")
         self.assertEqual(r.get("configured"), 0)
 
-    def test_nextbatch_on_an_unconfigured_queue_is_refused(self):
+    def test_nextbatch_on_a_playerid_lms_does_not_know_is_refused(self):
+        """nextbatch now establishes a queue for itself when there is none to
+        serve from, so what it cannot get past is not a missing queue but a
+        missing provider. An id LMS has no player for can never carry a Dont
+        Stop The Music setting, so it is refused -- and NO_PROVIDER is the
+        honest code: the caller's step is to name a player, not to seed one."""
         r = self.lms.dstm("nextbatch", "no-such-player")
-        self.assertEqual(code_of(r), "NOT_CONFIGURED")
+        self.assertEqual(code_of(r), "NO_PROVIDER")
 
     def test_unknown_provider_token_is_refused(self):
         """The token now comes from the player's own DSTM setting, so that is
@@ -113,8 +118,11 @@ class Queue(DSTMTestCase):
 
         r = self.lms.dstm("nextbatch", self.playerid, "count:6")
         batch = r.get("batch_loop") or []
+
+        # The length is the whole of the claim. There used to be a `complete`
+        # flag asserted here too; it is gone, because how much arrived and how
+        # much is left are both in the answer and a flag said less than they do.
         self.assertEqual(len(batch), 6)
-        self.assertEqual(r.get("complete"), 1)
         self.assertTrue(all(x.get("url") for x in batch), "an entry had no url")
         self.assertEqual(r.get("filling"), 1, "no refill was started for the tail")
 
@@ -154,6 +162,29 @@ class Queue(DSTMTestCase):
         r = self.lms.clear(self.playerid)
         self.assertGreater(r.get("removed", 0), 0)
         self.assertEqual(self.lms.state(self.playerid)[0], 0)
+
+
+class Version(DSTMTestCase):
+    """The plugin's own version.
+
+    It belongs to no family, and needs neither a player nor a provider -- but
+    it is a command like any other, so it is checked here with the rest.
+
+    What is asserted is that it answers with something version-shaped. That it
+    answers with the *right* version is a property of where it reads from --
+    LMS's own parse of install.xml -- and comparing it against this
+    repository's install.xml would fail whenever the deployment lags the repo,
+    which says nothing about the command.
+    """
+
+    queue = "test-basic-version"
+
+    def test_version_answers(self):
+        r = self.lms.call(["remoteplayercompanion", "version"])
+
+        self.assertIsNone(r.get("error"), f"version refused: {r}")
+        self.assertRegex(r.get("version") or "", r"^\d+\.\d+",
+                         "no version came back")
 
 
 class TrackFields(DSTMTestCase):

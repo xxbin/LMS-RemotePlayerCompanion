@@ -38,7 +38,7 @@ use constant SEEN_KEEP   => 2500;    # how many of the newest survive a prune
 
 # How deep a queue is when nothing says otherwise. The record owns this value:
 # CLI reads it from here rather than keeping a second copy that could drift.
-use constant DEFAULT_MAX => 20;
+use constant DEFAULT_MAX => 50;
 
 sub _key { KEY_PREFIX . $_[0] }
 

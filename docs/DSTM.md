@@ -15,49 +15,60 @@ All of these are registered with `needsClient = 0`, and carry the queue in the
 | Command | Does | Blocking |
 |---|---|---|
 | `sources playerid:<id> [all:<0\|1>]` | Lists the DSTM providers worth pointing a queue at | no |
-| `seed playerid:<id> [url:<u> \| id:<n>]` | Establishes a queue: adopts the player's provider, and gives it something to work from | no |
+| `seed playerid:<id> [url:<u> \| id:<n>]` | Establishes a queue, or starts one over: adopts the player's provider, and gives it something to work from | no |
 | `config playerid:<id> [token:<T>] [max:<N>]` | Sets the queue's depth, and optionally its provider. Optional — `seed` creates a queue without it | no |
-| `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | Hands out the front of the buffer and refills the tail | only when the buffer is empty |
+| `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | Hands out the front of the buffer and refills the tail. Establishes a queue itself when there is none to serve from | only when the buffer is empty |
 | `queue playerid:<id> [offset:<N>] [count:<N>] [tags:<letters>]` | Reads the buffer without consuming it | no |
 | `status playerid:<id>` | Queue metadata, including whether a fill is running | no |
 | `clear playerid:<id>` | Empties the buffer | no |
+| `forget playerid:<id>` | Drops the queue's record — the only way back to the state a player that has never used the plugin is in | no |
 
 ## The order to call them in
 
-Two things are needed and everything else is optional or a repeat: **a provider
-for the player**, and **one `seed`**. `seed` is what adopts the provider and
-creates the queue, so until it has run there is nothing for the other commands
-to act on.
+One thing is needed and everything else is optional or a repeat: **a queue that
+has adopted a provider**. One call gets there — there are two that do it, and
+either can be the first.
 
 | | Step | |
 |---|---|---|
 | 0 | `sources playerid:<id>` | optional — what there is to point a queue at |
-| 1 | Give the player a provider: set one for it in LMS's Dont Stop The Music settings, **or** name one with `config token:<T>` | **required, once** |
-| 2 | `config playerid:<id> [max:<N>]` | optional — buffer depth, 20 unless said |
-| 3 | `seed playerid:<id> [url:<u> \| id:<n>]` | **required, once** — creates the queue |
-| 4 | `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | the loop — call it whenever the player wants more |
-| 5 | `queue`, `status` | optional, any time — both read-only |
-| 6 | `clear playerid:<id>` | optional — empties the buffer |
+| 1 | `seed playerid:<id> [url:<u> \| id:<n>]` | **required once**, unless `config token:` names a provider or `nextbatch` is left to establish the queue itself — adopts the provider the player is set to, and creates the queue |
+| 2 | `config playerid:<id> [token:<T>] [max:<N>]` | optional — `token:` is the other way in, and creates the queue too; `max` is the buffer depth, 50 unless said |
+| 3 | `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | the loop — call it whenever the player wants more. Establishes a queue itself when there is none to serve from |
+| 4 | `queue`, `status` | optional, any time — both read-only |
+| 5 | `clear`, `forget playerid:<id>` | optional — `clear` empties the buffer, `forget` drops the queue's record |
 
-With the player already set to a provider in LMS, the shortest path that works
-is two calls, and `config` is not one of them:
+A queue draws from the provider **the player** is set to, which is why `seed`
+takes no token: it adopts that setting.
+
+Seeding first is the intended order, and it is worth doing even though nothing
+below insists on it. A seed can name the track the queue is to be built around,
+which `nextbatch` cannot, so the queue `nextbatch` establishes for itself is
+built from the plugin's own random selection instead. Seeding is also the
+deliberate moment at which a queue is started over.
+
+What is left is one call that works on its own. With the player already set to
+a provider in LMS:
 
 ```
-["", ["remoteplayercompanion", "dstm", "seed",      "playerid:02:00:79:b3:5d:7c"]]
 ["", ["remoteplayercompanion", "dstm", "nextbatch", "playerid:02:00:79:b3:5d:7c", "count:20"]]
 ```
 
-**Skipping step 1** answers `NO_PROVIDER`, and says where to set one. **Skipping
-step 3** answers `NOT_CONFIGURED` from everything else, because seeding is what
-creates the queue in the first place — `nextbatch` on a queue nobody has seeded
-has nothing to draw from, not even an empty one.
+`nextbatch` finds no queue, establishes one, and hands out a batch — the same
+establishment `seed` performs, minus the track a named seed would supply.
+`config` and `seed` remain how the queue is pointed somewhere in particular:
+`seed url:<u>` builds it around a track, and `config token:<T>` names a
+provider, writing it to the player's setting as well as to the record.
+
+**A player set to no provider is the one thing that cannot be worked around.**
+`seed` and `nextbatch` both answer `NO_PROVIDER`, and say where to set one.
 
 ### After that it is a loop
 
 `nextbatch` takes from the front of the buffer and refills the tail in the
 background, so it is called again and again and there is nothing to re-arm
 between calls. It answers at once with whatever the buffer holds, however short
-of `count` that falls; `complete` says whether the count was met. It waits only
+of `count` that falls. It waits only
 when the buffer is empty, since then there is nothing to return at all.
 
 `config` does not have to be called again either. Its depth persists in the
@@ -70,19 +81,27 @@ until something adopts another. Changing the provider in LMS does not reach a
 running queue. `seed` again — with or without a track — is what picks up a
 change, and it also refreshes the queue's derivation material.
 
-That makes `seed` safe to call on a queue that is already running, though its
-two modes are safe for different reasons. A seed that **names a track** replaces
-the previous one rather than adding to it — "I am playing this now" is about the
-present. A seed that **names nothing** only fills the buffer up to half the
-queue's depth, and leaves a queue that already holds that much alone. Either way
-re-seeding to pick up a provider change disturbs nothing else.
+**A seed starts the queue over.** It drops the buffer, and the material a
+previous seed established along with it, because a queue that kept either would
+go on deriving from a provider — or a track — the caller has moved on from. So
+seeding a queue that is playing throws away whatever it was holding, and seeding
+twice in a row does the work twice. That is the price of the only way to pick up
+a provider change.
+
+Both modes start over, and they differ only in what replaces what:
+
+- A seed that **names a track** sets the derivation material to that one track.
+  "I am playing this now" is a statement about the present, so the previous
+  material is replaced rather than added to.
+- A seed that **names nothing** fills the buffer to half the queue's depth, from
+  the plugin's own selection.
 
 ### What each step can fail with
 
-`NO_PROVIDER` and the provider refusals are step 1's; `BAD_MAX` is step 2's;
-`SEED_NOT_IN_LIBRARY` is step 3's, and `NO_SEED_AVAILABLE` is step 3 without a
-track when the plugin can find nothing to seed with. The rest are in
-[Errors](#errors).
+`NO_PROVIDER` and the provider refusals come from establishing a queue, so from
+`seed` and `nextbatch` alike; `BAD_MAX` is `config`'s; `SEED_NOT_IN_LIBRARY` is
+`seed`'s, and `NO_SEED_AVAILABLE` is either of them when the plugin can find
+nothing to seed with. The rest are in [Errors](#errors).
 
 ## Parameters
 
@@ -90,8 +109,8 @@ track when the plugin can find nothing to seed with. The rest are in
 |---|---|---|---|
 | `playerid` | all | — | Required. Identifies the queue, and must be an **id LMS knows** — see the note on where the provider comes from |
 | `token` | `config` | — | A provider to point the queue at. Written to the record **and** to the player's own Dont Stop The Music setting |
-| `max` | `config` | 20 | Buffer depth. Persisted, so it survives a restart |
-| `count` | `nextbatch`, `queue` | 10 / 50 | How many to hand out; `queue`'s is its page size. `seed` has none — see below |
+| `max` | `config` | 50 | Buffer depth, 1–100. Persisted, so it survives a restart |
+| `count` | `nextbatch`, `queue` | 10 / 50 | How many to hand out. `nextbatch` carries **at most 50 in one call**; `queue`'s is its page size and has no such ceiling. `seed` has none — see below |
 | `url` | `seed` | — | A library track to build the queue around. Never handed to the player |
 | `id` | `seed` | — | The same, by track id. Give one or the other, not both |
 | `offset` | `queue` | 0 | Page start |
@@ -127,7 +146,6 @@ from that — including why the `playerid` has to be an id LMS knows.
 {
   "playerid": "02:00:79:b3:5d:7c",
   "count": 20,
-  "complete": 1,
   "total": 30,
   "source": "PLUGIN_RANDOM_TITLEMIX_WITH_GENRES",
   "filling": 1,
@@ -136,13 +154,23 @@ from that — including why the `playerid` has to be an id LMS knows.
 }
 ```
 
-`count` is what was actually handed out, `total` is what is left in the buffer,
-and `complete` says whether the requested `count` was met. **A short batch is a
-normal answer, not an error**, and it comes back at once: anything at all in
-the buffer is handed over rather than the caller being held while a fill tries
-to do better. Waiting on a provider is time the caller spends for the
-provider's sake, and a cached player draining its buffer wants the tracks it
-has, not a fuller batch later. `complete` is what says the count was not met.
+`count` is what was actually handed out; `total` is what is left in the buffer
+behind it; `source` is the provider it came from; `filling` says whether a
+refill is running.
+
+There is no `complete`. How much arrived, how much is left and how deep the
+queue is are all in the answer already, and a caller comparing those knows more
+about what happened than a flag could tell it.
+
+**A single call carries at most 50 tracks.** Ask for more and the request is cut
+down to that, silently: the answer says what was handed over, and the caller
+asked for the rest and can see it did not come. Asking for 200 gets 50.
+
+**A short batch is a normal answer, not an error**, and it comes back at once:
+anything at all in the buffer is handed over rather than the caller being held
+while a fill tries to do better. Waiting on a provider is time the caller spends
+for the provider's sake, and a cached player draining its buffer wants the
+tracks it has, not a fuller batch later.
 
 Only an **empty** buffer waits — there is nothing to return, and the
 alternative is an empty answer. The wait ends when the fill delivers, when the
@@ -180,12 +208,12 @@ that needs a URL can build one from the id and the server it already knows.
 | Code | Meaning |
 |---|---|
 | `MISSING_PARAMETER` / `BAD_PARAMETER` | `playerid` absent or malformed, or `seed` given both `url:` and `id:` |
-| `NOT_CONFIGURED` | No queue for that `playerid` — nothing has seeded one |
-| `NO_PROVIDER` | `seed` found no Dont Stop The Music provider set for the player, so there was nothing to adopt |
+| `NOT_CONFIGURED` | The queue disappeared while the request was being served — reachable only when `forget` races a `nextbatch`. Nothing leaves a caller without a queue otherwise: `seed` and `nextbatch` both establish one |
+| `NO_PROVIDER` | No Dont Stop The Music provider is set for the player, so there was nothing for `seed` — or for a `nextbatch` establishing a queue for itself — to adopt |
 | `UNKNOWN_PROVIDER` | A token DSTM does not know — named in `config`, or found in the player's setting |
 | `PROVIDER_NOT_OFFERED` | A token DSTM knows but `sources` would not offer, from either route |
 | `SEED_NOT_IN_LIBRARY` | A named seed that is not a track in this library |
-| `BAD_MAX` | `max` outside 1–10000 |
+| `BAD_MAX` | `max` outside 1–100 |
 | `NO_SEED_AVAILABLE` | Seeding could select no tracks at all — RandomPlay unavailable, or an empty library |
 | `DSTM_DISABLED` | Don't Stop The Music is not enabled |
 | `NO_HANDLER` | DSTM knows the token but resolved no handler |
@@ -238,9 +266,10 @@ holds, DSTM answers `undef` when there is nothing there, and LastMix passes
 that to `Storable::dclone` without checking. Since `config` leaves a new queue
 empty, such a provider could not be used at all without this.
 
-`seed` fills the buffer up to `count` (10 by default) and then triggers a
-refill, so the queue's own provider takes over from the very next fill. It is
-idempotent: a queue already holding that many is left alone.
+`seed` fills the buffer to half the queue's depth and then triggers a refill, so
+the queue's own provider takes over from the very next fill. It fills by
+starting over rather than topping up — see
+[Seed again when the player's provider changes](#seed-again-when-the-players-provider-changes).
 
 The tracks come from the plugin's own selection, not from the queue's provider
 — asking a provider that needs a seed to supply that seed is the problem, not

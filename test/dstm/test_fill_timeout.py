@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from lmsrpc import DSTMTestCase  # noqa: E402
 
 SEED_N = 12
-DEEP = 400          # far more than any provider could deliver within the budget
+DEEP = 100          # more than any provider could deliver within the budget
 ATTEMPTS = 3
 WATCH = 42          # the budget is 30s; this leaves samples after it
 

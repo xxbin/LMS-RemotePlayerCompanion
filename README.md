@@ -29,6 +29,9 @@ Commands are `remoteplayercompanion <family> <action>`, so a family can be
 added without disturbing the others. Each family is a directory under the
 plugin, and registers its own commands.
 
+One command belongs to no family: `remoteplayercompanion version` answers the
+plugin's own version, read from `install.xml` — the only place it is written.
+
 | Family | What it is for | Status |
 |---|---|---|
 | [`dstm`](#the-dstm-family) | What to play next: a rolling queue filled from Dont Stop The Music providers | implemented |
@@ -73,7 +76,8 @@ own Dont Stop The Music setting — which is why the `playerid` has to be one LM
 knows — and, given a `url:` or `id:`, builds the queue around that one track
 without ever handing it to the player. `config` sets the depth and may name a
 provider instead; both are optional, since `seed` alone is enough to make a
-queue.
+queue. So is a `nextbatch` that finds none: it establishes the same queue for
+itself, though it cannot name a track to build around the way `seed` can.
 
 Every command in the family is registered with `needsClient = 0`, and carries
 the queue in the `playerid` parameter with `params[0]` left empty.

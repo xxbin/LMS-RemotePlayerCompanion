@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from lmsrpc import DSTMTestCase  # noqa: E402
 
 SEED_N = 12
-DEEP = 400
+DEEP = 100
 WINDOW = 35
 ATTEMPTS = 4
 
