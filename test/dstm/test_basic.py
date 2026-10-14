@@ -101,11 +101,26 @@ class Queue(DSTMTestCase):
 
     queue = "test-basic-queue"
 
-    def test_config_answers_without_waiting_for_the_fill(self):
+    def test_config_does_not_fill_the_queue_by_itself(self):
+        """config sets a queue up; filling it is not config's job.
+
+        Filling needs something to fill *from*, and giving a queue that is
+        seed's job. A config that started a fill of its own therefore invoked
+        the provider on an empty queue -- which is the one thing LastMix
+        cannot survive, so a caller doing config and then seed lost a provider
+        to a death it never saw.
+        """
+        self.lms.clear(self.playerid)
+
         started = time.time()
-        r = self.use_provider(SEED_TOKEN, 12)
+        r = self.lms.dstm("config", self.playerid, f"token:{SEED_TOKEN}", "max:12")
+
         self.assertLess(time.time() - started, 5, "config blocked on the provider")
         self.assertEqual(r.get("max"), 12)
+
+        time.sleep(2)
+        self.assertEqual(self.lms.state(self.playerid)[0], 0,
+                         "config started a fill of its own")
 
     def test_the_buffer_fills_to_the_configured_depth(self):
         self.use_provider(SEED_TOKEN, 12)

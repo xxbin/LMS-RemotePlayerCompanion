@@ -224,12 +224,13 @@ sub cliConfig {
 	$request->addResult( 'provider', $rec->{provider} || '' );
 	$request->addResult( 'total',    Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) );
 
-	# Answer first, then start filling. The fill yields to the event loop
-	# between provider calls, so this returns without waiting for it.
+	# Answer, and stop there. config does not start a fill: filling needs
+	# something to fill *from*, and giving a queue that is seed's job. A fill
+	# begun here would hand the provider whatever the queue holds at that
+	# moment -- nothing at all, on a queue being configured for the first time
+	# -- and a provider that derives from the queue does not survive that. See
+	# the note on an empty playlist in Queue::playlist.
 	$request->setStatusDone;
-
-	Plugins::RemotePlayerCompanion::DSTM::Refill->ensure($playerid)
-		if $rec->{provider};
 
 	return;
 }
@@ -246,14 +247,26 @@ sub cliNextbatch {
 	# step every caller has to know about -- establish the queue here. What
 	# that cannot do is invent a provider, so a player with none set in LMS is
 	# still refused, with NO_PROVIDER naming the setting to go and make.
-	unless ( $rec && $rec->{provider} ) {
+	# Nothing to serve from -- no queue, or none with a provider -- or nothing
+	# to serve *with*. A queue with a provider but no material is the same
+	# problem seen from the provider's side: one that derives its selection
+	# from the queue cannot be handed an empty one (see Queue::playlist). Both
+	# cases are established here rather than refused.
+	unless (   $rec
+		&& $rec->{provider}
+		&& @{ Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) } )
+	{
 		main::DEBUGLOG && $log->is_debug && $log->debug(
-			"nextbatch $playerid: nothing to serve from"
-				. ( $rec ? ' (a queue with no provider)' : ' (no queue)' )
-				. '; establishing one'
+			"nextbatch $playerid: nothing to serve from ("
+				. ( $rec
+					? ( $rec->{provider}
+						? 'a queue with nothing to derive from'
+						: 'a queue with no provider' )
+					: 'no queue' )
+				. '); establishing one'
 		);
 
-		my ( undef, $fail, $message ) = _establish( $request, $playerid );
+		my ( undef, $fail, $message ) = _establish( $request, $playerid, 'nextbatch' );
 
 		return _fail( $request, $fail, $message ) if $fail;
 
@@ -465,7 +478,14 @@ sub cliForget {
 # a refused call leaves the queue exactly as it was -- refusing must not be a
 # way to unconfigure a queue that is already working.
 sub _establish {
-	my ( $request, $playerid ) = @_;
+	my ( $request, $playerid, $what ) = @_;
+
+	# A queue that already has a provider keeps it, unless `seed` is what is
+	# asking. Re-seeding is how a provider the player has changed since gets
+	# picked up, which is why seed always adopts; nextbatch, establishing a
+	# queue it found with nothing to serve from, is only giving that queue
+	# material, and a batch request is no place to re-point somebody's queue.
+	my $repoint = ( $what eq 'seed' );
 
 	my $rec = Plugins::RemotePlayerCompanion::DSTM::Queue->load($playerid);
 
@@ -474,29 +494,39 @@ sub _establish {
 		$rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) : [],
 	);
 
-	my ( $token, $providerErr ) =
-		Plugins::RemotePlayerCompanion::DSTM::Provider->adopted($vClient);
+	my ( $token, $providerErr );
 
-	if ($providerErr) {
+	if ( $rec && $rec->{provider} && !$repoint ) {
+		$token = $rec->{provider};
+
 		main::DEBUGLOG && $log->is_debug
-			&& $log->debug("seed $playerid: no provider to adopt ($providerErr)");
-
-		return ( 0, $providerErr, _providerMessage( $providerErr, $playerid ) );
+			&& $log->debug("$what $playerid: keeping provider $token");
 	}
+	else {
+		( $token, $providerErr ) =
+			Plugins::RemotePlayerCompanion::DSTM::Provider->adopted($vClient);
 
-	# **The token, which a caller cannot see from anywhere else.** A queue draws
-	# from the provider the *player* was set to when it was seeded, and goes on
-	# drawing from it after that setting changes, so the queue's provider and
-	# the player's can differ. This is the only line that says which one this
-	# queue actually took.
-	main::DEBUGLOG && $log->is_debug
-		&& $log->debug("seed $playerid: adopted provider $token");
+		if ($providerErr) {
+			main::DEBUGLOG && $log->is_debug
+				&& $log->debug("$what $playerid: no provider to adopt ($providerErr)");
+
+			return ( 0, $providerErr, _providerMessage( $providerErr, $playerid ) );
+		}
+
+		# **The token, which a caller cannot see from anywhere else.** A queue
+		# draws from the provider the *player* was set to when it was seeded,
+		# and goes on drawing from it after that setting changes, so the queue's
+		# provider and the player's can differ. This is the only line that says
+		# which one this queue took.
+		main::DEBUGLOG && $log->is_debug
+			&& $log->debug("$what $playerid: adopted provider $token");
+	}
 
 	my ( $url, $urlErr, $urlMessage ) = _trackUrl($request);
 
 	if ($urlErr) {
 		main::DEBUGLOG && $log->is_debug
-			&& $log->debug("seed $playerid: refused, $urlErr");
+			&& $log->debug("$what $playerid: refused, $urlErr");
 
 		return ( 0, $urlErr, $urlMessage );
 	}
@@ -524,7 +554,7 @@ sub _establish {
 
 		unless ( scalar @{$urls} ) {
 			main::DEBUGLOG && $log->is_debug
-				&& $log->debug("seed $playerid: nothing could be selected to seed with (NO_SEED_AVAILABLE)");
+				&& $log->debug("$what $playerid: nothing could be selected to seed with (NO_SEED_AVAILABLE)");
 
 			return ( 0, 'NO_SEED_AVAILABLE',
 				'could not select any tracks to seed with; is RandomPlay available and the library populated?' );
@@ -558,7 +588,7 @@ sub _establish {
 	# What the seed did, in one line: which way it went, how much it dropped to
 	# get there, and what the queue holds now.
 	main::DEBUGLOG && $log->is_debug && $log->debug(
-		"seed $playerid: "
+		"$what $playerid: "
 			. ( defined $url
 				? "built around $url"
 				: "filled " . ( 0 + $added ) . " of $target from the plugin's own selection" )
@@ -586,7 +616,7 @@ sub cliSeed {
 	my ( $playerid, $err ) = _playerId($request);
 	return _fail( $request, $err ) if $err;
 
-	my ( $added, $fail, $message ) = _establish( $request, $playerid );
+	my ( $added, $fail, $message ) = _establish( $request, $playerid, 'seed' );
 	return _fail( $request, $fail, $message ) if $fail;
 
 	my $rec = Plugins::RemotePlayerCompanion::DSTM::Queue->load($playerid);
@@ -690,6 +720,28 @@ sub _serve {
 
 	my $urls = Plugins::RemotePlayerCompanion::DSTM::Queue->take( $rec, $count );
 
+	# The seed follows the queue. Whatever this batch handed over last is what
+	# the queue is about now, and it is what the next fill derives from --
+	# whether or not this batch was the one that emptied the buffer.
+	#
+	# That it is a track already handed out is the point, and it costs nothing:
+	# it has left the buffer, so it cannot be served twice, and it is in the
+	# dedup memory besides. What it buys is that the material never runs out --
+	# a queue that has served anything always has something to derive from, and
+	# a provider handed an empty queue does not merely answer with nothing:
+	# LastMix asks DSTM for the properties of what the queue holds, gets undef,
+	# and passes that to Storable::dclone without checking, which kills it.
+	#
+	# A batch that handed over nothing leaves the seed alone: there is nothing
+	# newer to make it from, and dropping what is there would take away the one
+	# thing a deriving provider has left.
+	if ( @{$urls} ) {
+		Plugins::RemotePlayerCompanion::DSTM::Queue->setSeed( $rec, $urls->[-1] );
+
+		main::DEBUGLOG && $log->is_debug && $log->debug(
+			"nextbatch $playerid: seed is now " . $urls->[-1] );
+	}
+
 	Plugins::RemotePlayerCompanion::DSTM::Queue->save($rec);
 
 	# Top the tail back up for the next caller.
@@ -700,7 +752,11 @@ sub _serve {
 	my @batch = map { _trackInfo( $request, $_, $tags ) } @{$urls};
 
 	$request->addResult( 'playerid', $playerid );
-	$request->addResult( 'count',    scalar @batch );
+	# `0 +` because an empty array's length is Perl's shared zero scalar, which
+	# carries the string flag -- so this one number went out as "0" where every
+	# other answer's numbers arrive as numbers. Arithmetic makes a scalar of our
+	# own, which the encoder reads as the number it is.
+	$request->addResult( 'count',    0 + scalar @batch );
 	_addLoop( $request, 'batch_loop', \@batch );
 	$request->addResult( 'total',    Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) );
 	$request->addResult( 'source',   $rec->{provider} || '' );

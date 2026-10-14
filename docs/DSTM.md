@@ -16,8 +16,8 @@ All of these are registered with `needsClient = 0`, and carry the queue in the
 |---|---|---|
 | `sources playerid:<id> [all:<0\|1>]` | Lists the DSTM providers worth pointing a queue at | no |
 | `seed playerid:<id> [url:<u> \| id:<n>]` | Establishes a queue, or starts one over: adopts the player's provider, and gives it something to work from | no |
-| `config playerid:<id> [token:<T>] [max:<N>]` | Sets the queue's depth, and optionally its provider. Optional — `seed` creates a queue without it | no |
-| `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | Hands out the front of the buffer and refills the tail. Establishes a queue itself when there is none to serve from | only when the buffer is empty |
+| `config playerid:<id> [token:<T>] [max:<N>]` | Sets the queue's depth, and optionally its provider. Optional — `seed` creates a queue without it, and `config` starts no fill of its own | no |
+| `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | Hands out the front of the buffer and refills the tail. Establishes a queue itself when there is none to serve from, or nothing in it to derive from | only when the buffer is empty |
 | `queue playerid:<id> [offset:<N>] [count:<N>] [tags:<letters>]` | Reads the buffer without consuming it | no |
 | `status playerid:<id>` | Queue metadata, including whether a fill is running | no |
 | `clear playerid:<id>` | Empties the buffer | no |
@@ -55,7 +55,12 @@ a provider in LMS:
 ```
 
 `nextbatch` finds no queue, establishes one, and hands out a batch — the same
-establishment `seed` performs, minus the track a named seed would supply.
+establishment `seed` performs, minus the track a named seed would supply. It
+does the same for a queue that has a provider but nothing for that provider to
+work from, which `config token:<T>` leaves behind on purpose: establishing a
+queue that way gives it material and leaves the provider it already has alone,
+where `seed` is the command that re-adopts the player's setting.
+
 `config` and `seed` remain how the queue is pointed somewhere in particular:
 `seed url:<u>` builds it around a track, and `config token:<T>` names a
 provider, writing it to the player's setting as well as to the record.
@@ -275,6 +280,15 @@ The tracks come from the plugin's own selection, not from the queue's provider
 — asking a provider that needs a seed to supply that seed is the problem, not
 the solution. It is a starting point, not a curated one.
 
+**The material outlives the buffer.** Every batch that hands tracks over
+leaves the last of them as what the queue is about, so a queue that has served
+anything always has something for a provider to derive from. That matters more
+than it sounds: a provider handed an empty queue does not merely answer with
+nothing — LastMix asks DSTM for the properties of what the queue holds, gets
+`undef`, and passes that to `Storable::dclone` without checking, which kills it
+and leaves `HANDLER_DIED` on the queue. A batch that hands over nothing leaves
+the seed as it was, there being nothing newer to make it from.
+
 Providers that do not want one need none: `PLUGIN_RANDOM_*` answers with a
 recipe the plugin expands itself, and RatingsLight selects from the whole
 library, so both work on an empty queue.
@@ -301,7 +315,9 @@ accepting it and quietly doing nothing.
 A named seed **replaces** any previous one. "I am playing this now" is a
 statement about the present, not an accumulation. It is also applied to a
 queue that is already full, which the usual "already holds enough" early
-return would otherwise swallow.
+return would otherwise swallow. Nor is it permanent: the first batch the queue
+hands over moves the seed on to what it handed over last, so naming a track
+says what the queue is about now, not what it will be about for good.
 
 ## A note on `sources`
 
@@ -358,8 +374,9 @@ records, and not something we can ask a token.
 
 ## Design notes
 
-**The buffer is a rolling window, not an archive.** `config` fills it to `max`
-in the background and `nextbatch` takes from the head while refilling the tail.
+**The buffer is a rolling window, not an archive.** `seed` gives it its first
+tracks and the fills that follow carry it to `max` in the background, while
+`nextbatch` takes from the head and refills the tail.
 Because it is bounded by construction, nothing is ever trimmed away behind the
 caller's back, and `nextbatch` normally answers instantly no matter how slow
 the provider is.
@@ -405,9 +422,9 @@ called with `->`.
 
 **Fills yield to the event loop.** Several providers answer synchronously —
 every RandomPlay token does. If a fill called them back to back, it would run to
-completion inside the command that started it, and `config` would block despite
-being documented as non-blocking. Each fill step is scheduled with a zero-delay
-timer, so the chain always returns to the event loop first.
+completion inside the command that started it, and `seed` would block on a
+provider that answers only when it is ready. Each fill step is scheduled with a
+zero-delay timer, so the chain always returns to the event loop first.
 
 **Queue records use a private cache namespace.** Records live in
 `Slim::Utils::Cache`, but under a namespace of our own rather than the default

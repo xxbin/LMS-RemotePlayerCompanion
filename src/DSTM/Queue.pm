@@ -92,6 +92,13 @@ sub create {
 # holds. The seed is not queue content -- see seed() below -- but a provider
 # that reads the queue should still see it, or a queue built around a track
 # would stop looking like it.
+#
+# **It must not come back empty on a queue that has held anything.** A provider
+# that derives its selection from the queue does not merely answer with nothing
+# when handed an empty one: LastMix asks DSTM for the properties of what the
+# queue holds, gets undef, and passes that to Storable::dclone without
+# checking, which kills the provider outright. So something is always kept to
+# derive from -- the seed a caller named, or the last track a drain left.
 sub playlist {
 	my ( $class, $rec ) = @_;
 
