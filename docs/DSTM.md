@@ -15,12 +15,12 @@ Music has registered.
 
 The remote player is a *cached* player: it keeps audio on the device and plays it
 locally, which means it has to know what to fetch before it needs it. It asks for a
-batch to cache, and the plugin answers from a buffer it keeps topped up in the
+batch to cache, and the plugin answers from a queue it keeps topped up in the
 background — so the player never waits on a slow or asynchronous
 music-discovery provider.
 
 ```
-   player ──nextbatch──▶ buffer ──take──▶ a batch of tracks to cache
+   player ──nextbatch──▶ tracks ──take──▶ a batch of tracks to cache
                          ▲
                          └──── fill ───── DSTM provider (RandomPlay, LastMix, …)
 ```
@@ -40,11 +40,11 @@ All of these are registered with `needsClient = 0`.
 
 ## How it works
 
-### The two lists a queue keeps
+### The queue's tracks and its seed
 
-A queue holds two separate lists, and what separates them matters:
+A queue's record holds two lists, and the difference between them matters:
 
-- the **buffer** — the tracks waiting to be handed out. `nextbatch` serves from it,
+- **`tracks`** — what is waiting to be handed out. `nextbatch` serves from it,
   `total` counts it, `clear` empties it;
 - the **seed** — what the provider derives its selection *from*. `nextbatch` never
   serves it, `take` never touches it, and `total` does not count it.
@@ -61,7 +61,7 @@ track must never come back in a batch, so it is kept out of the list that
 
 **The seed follows the queue.** Every batch that hands tracks over leaves the last
 of them as what the queue is about, so a queue that has served anything always has
-something for a provider to derive from, even once its buffer has drained. A batch
+something for a provider to derive from, even once the queue has drained. A batch
 that hands over nothing leaves the seed as it was, there being nothing newer to
 make it from.
 
@@ -112,7 +112,7 @@ queue's real provider takes over from the very next fill.
 
 ### One fill
 
-A **fill** is one pass at topping the buffer up to `max`, running in the
+A **fill** is one pass at topping the queue up to `max`, running in the
 background. `seed` kicks one after it has given the queue material, `nextbatch`
 kicks one for the tail it just took, and nothing else does — `config` sets a
 provider and a depth and starts no fill of its own, because a fill needs something
@@ -181,18 +181,18 @@ queue as `last_error`, and `status` reports it. Without that, a caller sees an
 empty queue and cannot tell a provider that timed out from one that genuinely had
 nothing to offer. `last_error` is cleared again when a fill does add something.
 
-**Callers that need more than the buffer holds** register as *waiters* rather than
-being answered short: `nextbatch` on an empty buffer parks, and is woken when the
-buffer grows enough for it, or when the fill ends, or when its own budget runs out.
+**Callers that need more than the queue holds** register as *waiters* rather than
+being answered short: `nextbatch` on an empty queue parks, and is woken when it
+grows enough, or when the fill ends, or when its own budget runs out.
 That is the only time any command here blocks.
 
-### The buffer is a window, not an archive
+### The queue is a window, not an archive
 
-`seed` puts the first tracks in, and the fills that follow carry the buffer up to
-`max`; `nextbatch` takes from the front and a fill puts more on the end. Nothing
-is ever trimmed away behind a caller's back, because nothing has to be: the buffer
-is bounded by how deep the queue is, not by time, so tracks leave it only when
-somebody asks for them.
+`seed` puts the first tracks in, and the fills that follow carry the queue up to
+`max`; `nextbatch` takes from the front and a fill puts more on the end. Nothing is
+ever trimmed away behind a caller's back, because nothing has to be: the queue is
+bounded by how deep it is, not by time, so tracks leave it only when somebody asks
+for them.
 
 That is also why `nextbatch` normally answers at once however slow the provider
 is. There is no waiting to be done while there is anything to hand over.
@@ -242,11 +242,11 @@ they are the first three below.
 | | Step | |
 |---|---|---|
 | 0 | `sources playerid:<id>` | optional — which providers `config` can be given |
-| 1 | `config playerid:<id> [token:<T>] [max:<N>]` | optional — `token:` names a provider, and **overwrites the one the player has in LMS**; without it the queue uses that setting as it stands. `max` is the buffer depth, 50 unless said |
+| 1 | `config playerid:<id> [token:<T>] [max:<N>]` | optional — `token:` names a provider, and **overwrites the one the player has in LMS**; without it the queue uses that setting as it stands. `max` is the queue's depth, 50 unless said |
 | 2 | `seed playerid:<id> [url:<u> \| id:<n>]` | **required once**, unless `config token:` named a provider or `nextbatch` is left to establish the queue itself — adopts the provider the player is set to, and creates the queue |
 | 3 | `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | the loop — call it whenever the player wants more |
 | 4 | `queue`, `status` | optional, any time — both read-only |
-| 5 | `clear`, `forget playerid:<id>` | optional — `clear` empties the buffer, `forget` drops the queue's record |
+| 5 | `clear`, `forget playerid:<id>` | optional — `clear` empties the tracks, `forget` drops the queue's record |
 
 A queue draws from the provider **the player** is set to, which is why `seed`
 takes no token: it adopts that setting.
@@ -281,10 +281,10 @@ re-adopts the player's setting.
 
 #### After that it is a loop
 
-`nextbatch` takes from the front of the buffer and refills the tail in the
+`nextbatch` takes from the front of the queue and refills the tail in the
 background, so it is called again and again and there is nothing to re-arm between
-calls. It answers at once with whatever the buffer holds, however short of `count`
-that falls. It waits only when the buffer is empty, since then there is nothing to
+calls. It answers at once with whatever the queue holds, however short of `count`
+that falls. It waits only when the queue is empty, since then there is nothing to
 return at all.
 
 `config` does not have to be called again either. Its depth persists in the queue
@@ -297,7 +297,7 @@ until something adopts another. Changing the provider in LMS does not reach a
 running queue. `seed` again — with or without a track — is what picks up a change,
 and it also refreshes the queue's derivation material.
 
-**A seed starts the queue over.** It drops the buffer, and the material a previous
+**A seed starts the queue over.** It drops the tracks, and the material a previous
 seed established along with it, because a queue that kept either would go on
 deriving from a provider — or a track — the caller has moved on from. So seeding a
 queue that is playing throws away whatever it was holding, and seeding twice in a
@@ -309,7 +309,7 @@ Both modes start over, and they differ only in what replaces what:
 - A seed that **names a track** sets the derivation material to that one track.
   "I am playing this now" is a statement about the present, so the previous
   material is replaced rather than added to.
-- A seed that **names nothing** fills the buffer to half the queue's depth, from
+- A seed that **names nothing** fills the queue to half its depth, from
   the plugin's own selection.
 
 ### `sources` — the providers `config` can be given
@@ -353,15 +353,15 @@ Fails with `DSTM_DISABLED` when Dont Stop The Music is not enabled.
 | Parameter | Default | |
 |---|---|---|
 | `token` | — | A provider to point the queue at, empty to disable the queue, or omitted to leave the player's own configuration alone |
-| `max` | 50 | Buffer depth, 1–100. Persisted, so it survives a restart |
+| `max` | 50 | How deep the queue is, 1–100. Persisted, so it survives a restart |
 
 ```json
 { "playerid": "…", "max": 50, "provider": "PLUGIN_RANDOM_TRACK", "total": 0 }
 ```
 
-`total` is the buffer at the moment of the answer. On a queue being configured for
+`total` is what the queue holds at the moment of the answer. On one being set up for
 the first time it is `0`, because `config` starts no fill: that is not a failure,
-and it is not a reason to read the buffer again on the next line.
+and it is not a reason to read the queue again on the next line.
 
 **`token:` is about the system's Dont Stop The Music configuration, not only about
 this queue.** Naming a provider writes it to two places: the queue's record, and
@@ -379,7 +379,7 @@ why `seed` takes no token of its own.
 **An empty `token:` disables the queue.** Sending no provider is not the same as
 sending none: `config max:` on its own leaves the queue's provider alone, where
 `config token:` clears it. Disabling clears the provider from **both** places — the
-record and the player's own setting — and empties the buffer along with the seed.
+record and the player's own setting — and empties the tracks along with the seed.
 The player's setting has to go too, and that is not tidiness: a queue with no
 provider establishes one from the player the next time anything asks it for tracks,
 so a disable that stopped at the record would be undone by the next `nextbatch`.
@@ -416,7 +416,7 @@ a caller.
 ```
 
 The queue as it now stands, plus what the seeding did: `added` is how many tracks
-went in, `total` is the buffer afterwards. `seeded_track` is the track the queue is
+went in, `total` is what the queue holds afterwards. `seeded_track` is the track the queue is
 now built around, if one was named — reported so that a caller can tell a seed that
 was taken from one that was ignored, because a seed that never lands otherwise
 looks exactly like a queue that has not filled yet.
@@ -454,7 +454,7 @@ Fails with `NO_PROVIDER`, `UNKNOWN_PROVIDER`, `PROVIDER_NOT_OFFERED`,
 }
 ```
 
-`count` is what was actually handed out, `total` what is left in the buffer behind
+`count` is what was actually handed out, `total` what is left in the queue behind
 it, `source` the provider it came from, and `filling` whether a refill is running.
 
 There is no `complete`. How much arrived, how much is left and how deep the queue
@@ -465,12 +465,12 @@ what happened than a flag could tell it.
 over, and the caller asked for the rest and can see it did not come.
 
 **A short batch is a normal answer, not an error**, and it comes back at once:
-anything at all in the buffer is handed over rather than the caller being held
+anything at all in the queue is handed over rather than the caller being held
 while a fill tries to do better. Waiting on a provider is time the caller spends
-for the provider's sake, and a cached player draining its buffer wants the tracks
+for the provider's sake, and a cached player draining its queue wants the tracks
 it has, not a fuller batch later.
 
-Only an **empty** buffer waits — there is nothing to return, and the alternative
+Only an **empty** queue waits — there is nothing to return, and the alternative
 is an empty answer. The wait ends when the fill delivers, when the fill concludes
 with nothing (answered with `count: 0` and no error, because a provider having
 nothing new is a valid answer), or when the budget runs out.
@@ -478,7 +478,7 @@ nothing new is a valid answer), or when the budget runs out.
 Fails with `NOT_CONFIGURED`, `NO_PROVIDER`, `UNKNOWN_PROVIDER`,
 `PROVIDER_NOT_OFFERED`, `DSTM_DISABLED`, `NO_SEED_AVAILABLE` or `SOURCE_TIMEOUT`.
 
-### `queue` — read the buffer without consuming it
+### `queue` — read the queue without consuming it
 
 ```
 ["", ["remoteplayercompanion", "dstm", "queue", "playerid:02:00:79:b3:5d:7c",
@@ -496,7 +496,7 @@ Fails with `NOT_CONFIGURED`, `NO_PROVIDER`, `UNKNOWN_PROVIDER`,
   "queue_loop": [ { … }, { … } ] }
 ```
 
-`total` is the whole buffer, `offset` and `count` describe the page, and the
+`total` is everything the queue holds, `offset` and `count` describe the page, and
 entries carry the same fields a batch does. Nothing is consumed, so this is how a
 caller looks at what is coming without taking it.
 
@@ -522,7 +522,7 @@ written.
 a message. It is the answer to "why is this queue not filling" — see
 [Errors](#errors) for why an empty batch on its own does not say.
 
-### `clear` — empty the buffer
+### `clear` — empty the tracks
 
 ```
 ["", ["remoteplayercompanion", "dstm", "clear", "playerid:02:00:79:b3:5d:7c"]]
@@ -533,7 +533,7 @@ a message. It is the answer to "why is this queue not filling" — see
 ```
 
 `removed` is how many tracks it dropped. The queue, its depth, its provider and its
-seed all stay: this is only the buffer. The dedup memory goes with it — a queue
+seed all stay: this is only the tracks. The dedup memory goes with it — a queue
 that has already served a track would otherwise refuse to hold it again — so a
 cleared queue may hand out tracks it has served before.
 
@@ -566,7 +566,7 @@ to keep in step with LMS, and a field LMS adds to its own would go missing here.
 With no `tags:`, an entry carries `url`, `id`, `title`, `artist`, `album`, `year`,
 `duration`, `tracknum` and `coverid` — the set these commands returned before there
 was a `tags` parameter, plus `coverid`. `id` and `title` come back whatever the
-tags say, and so does `url`, which is set from the buffer rather than fetched from
+tags say, and so does `url`, which is set from the queue rather than fetched from
 the database.
 
 **The types are LMS's own, and they are not uniform.** Measured on a real answer:
@@ -575,8 +575,8 @@ not `"11:19"`), and `year`, `tracknum` and `coverid` are **strings** (`"1957"`,
 `"5"`, `"30776732"`). A caller that parses these should not assume a number, and
 should not assume a string either.
 
-`url` is always the one the buffer handed out, which can differ from the
-database's — a cue sheet gives a url a `#start-end` suffix — and it is the buffer's
+`url` is always the one the queue handed out, which can differ from the
+database's — a cue sheet gives a url a `#start-end` suffix — and it is the queue's
 that the player has to be able to fetch. A track whose fields LMS cannot resolve —
 an entry the database does not hold — comes back with its `url` alone rather than
 taking the whole answer down.

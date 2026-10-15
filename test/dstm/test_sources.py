@@ -4,9 +4,9 @@
 Being listed and being usable are different things, and the difference is
 easy to measure wrongly. Each provider is offered a queue that already holds
 a seed, because several of them select from what the queue holds -- so a
-non-zero buffer proves nothing. What counts is the provider adding tracks
+non-zero count proves nothing. What counts is the provider adding tracks
 *beyond* the seed, and that has to be waited for: config answers before the
-provider does, so reading the buffer straight after a config measures nothing.
+provider does, so reading the queue straight after a config measures nothing.
 
 The sweep is done once, in setUpClass, and the test methods assert over what
 it recorded. Offering every provider a queue is the most expensive thing in
@@ -97,14 +97,14 @@ class Sources(DSTMTestCase):
         if refused:
             return {"added": 0, "refused": refused, "errored": None, "timed_out": False}
 
-        buffered, err = wait_for_fill(cls.lms, cls.playerid, WAIT)
+        held, err = wait_for_fill(cls.lms, cls.playerid, WAIT)
 
         # SOURCE_TIMEOUT is not an error the provider reported. It is a fill the
         # plugin gave up on, which is the budget doing its job -- the provider
         # accepted the call and never answered. Anything else in last_error
         # (HANDLER_DIED above all) is a provider that really did go wrong.
         return {
-            "added":     buffered - seeded,
+            "added":     held - seeded,
             "refused":   None,
             "errored":   None if err in (None, "SOURCE_TIMEOUT") else err,
             "timed_out": err == "SOURCE_TIMEOUT",

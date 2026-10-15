@@ -105,7 +105,7 @@ class Refusals(DSTMTestCase):
         r = self.lms.dstm("config", self.playerid, "token:")
 
         self.assertEqual(r.get("provider"), "", "the queue kept its provider")
-        self.assertEqual(r.get("total"), 0, "the buffer was left behind")
+        self.assertEqual(r.get("total"), 0, "the tracks were left behind")
         self.assertEqual(self.lms.status(self.playerid).get("configured"), 1,
                          "the queue itself was dropped rather than disabled")
 
@@ -151,10 +151,10 @@ class Queue(DSTMTestCase):
         self.assertEqual(self.lms.state(self.playerid)[0], 0,
                          "config started a fill of its own")
 
-    def test_the_buffer_fills_to_the_configured_depth(self):
+    def test_the_tracks_fill_to_the_configured_depth(self):
         self.use_provider(SEED_TOKEN, 12)
-        buffered = wait_for_count(self.lms, self.playerid, 12, 45)
-        self.assertGreaterEqual(buffered, 12, "the buffer never reached its depth")
+        held = wait_for_count(self.lms, self.playerid, 12, 45)
+        self.assertGreaterEqual(held, 12, "the tracks never reached that depth")
 
     def test_nextbatch_hands_out_what_was_asked_for(self):
         self.use_provider(SEED_TOKEN, 12)
@@ -191,13 +191,13 @@ class Queue(DSTMTestCase):
         r = self.lms.dstm("queue", self.playerid)
         self.assertEqual(r.get("total"), len(r.get("queue_loop") or []))
 
-    def test_the_buffer_stays_within_max(self):
+    def test_the_tracks_stay_within_max(self):
         self.use_provider(SEED_TOKEN, 12)
         wait_for_count(self.lms, self.playerid, 12, 45)
         for _ in range(3):
             self.lms.dstm("nextbatch", self.playerid, "count:5")
-        buffered, _filling, _err = self.lms.state(self.playerid)
-        self.assertLessEqual(buffered, self.lms.status(self.playerid).get("max"))
+        held, _filling, _err = self.lms.state(self.playerid)
+        self.assertLessEqual(held, self.lms.status(self.playerid).get("max"))
 
     def test_clear_reports_what_it_dropped_and_empties_the_queue(self):
         self.use_provider(SEED_TOKEN, 12)

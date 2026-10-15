@@ -3,7 +3,7 @@
 arriving after that is discarded.
 
 A fill only reaches its budget when nothing else ends it, so this needs a
-provider that is slow and still productive at 30 seconds. Asking for a buffer
+provider that is slow and still productive at 30 seconds. Asking for a queue
 far deeper than it could reach in that time gets there. Such providers answer
 with nothing now and then, so the scenario is retried and the test skips
 rather than failing on an uncooperative one.
@@ -121,7 +121,7 @@ class FillTimeout(DSTMTestCase):
         self.assertTrue(later, "nothing was observed after the fill ended")
         for at, total, _filling, _err in later:
             self.assertEqual(total, settled,
-                             f"the buffer moved from {settled} to {total} at t+{at}s, "
+                             f"the queue moved from {settled} to {total} at t+{at}s, "
                              "so a late result was acted on")
 
 

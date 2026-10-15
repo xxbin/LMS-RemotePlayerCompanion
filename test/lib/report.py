@@ -15,7 +15,7 @@ import unittest
 
 
 def humanise(name):
-    """'test_the_buffer_fills' -> 'the buffer fills'."""
+    """'test_the_tracks_fill' -> 'the tracks fill'."""
     if name.startswith("test_"):
         name = name[5:]
     return name.replace("_", " ")

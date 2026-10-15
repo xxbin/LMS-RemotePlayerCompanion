@@ -58,7 +58,7 @@ clear, not because anything is stubbed out for them.
 
 A rolling queue of tracks to play next, filled from the providers Dont Stop
 The Music has registered. The remote player asks for a batch to cache, and the
-plugin answers from a buffer it keeps topped up in the background — so the
+plugin answers from a queue it keeps topped up in the background — so the
 player never waits on a slow or asynchronous music-discovery provider.
 
 ```
@@ -83,7 +83,7 @@ Every command in the family is registered with `needsClient = 0`, and carries
 the queue in the `playerid` parameter with `params[0]` left empty.
 
 The rest of it — each command and the parameters it takes, the shapes it
-answers with, the errors it raises, and why the buffer is built the way it is
+answers with, the errors it raises, and why the queue is built the way it is
 — is in **[docs/DSTM.md](docs/DSTM.md)**.
 
 ## The remote player is not an LMS client
@@ -112,7 +112,7 @@ LMS's plugin directories:
 ├── Plugin.pm          entry point: brings up the command families
 ├── DSTM/              the 'remoteplayercompanion dstm *' family
 │   ├── CLI.pm         command handlers and their registration
-│   ├── Queue.pm       the queue: records and buffer operations
+│   ├── Queue.pm       the queue: its records, and the operations on them
 │   ├── Refill.pm      the refill loop: gating, waiters, timeouts
 │   ├── Provider.pm    provider invocation, filtering, result routing
 │   ├── RandomPlay.pm  the RandomPlay coupling: recipes and id selection

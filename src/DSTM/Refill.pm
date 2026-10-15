@@ -53,8 +53,8 @@ package Plugins::RemotePlayerCompanion::DSTM::Refill;
 #     stuck waiting on a callback that never arrives.
 #
 # One fill per queue at a time, bounded by a single budget timer. Callers
-# that need more than the buffer currently holds register as waiters and are
-# woken when the buffer grows enough for them or when the fill ends.
+# that need more than the queue currently holds register as waiters and are
+# woken when it grows enough for them or when the fill ends.
 
 use strict;
 use warnings;
@@ -106,7 +106,7 @@ sub ensure {
 		$log->debug( "fill start: $playerid provider="
 			. ( $rec && $rec->{provider} ? $rec->{provider} : 'none' )
 			. ' target=' . ( $rec ? 0 + $rec->{max} : 0 )
-			. ' buffered=' . ( $rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) : 0 )
+			. ' tracks=' . ( $rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) : 0 )
 			. ' max_calls=' . MAX_CALLS . ' budget=' . FILL_BUDGET . 's' );
 	}
 
@@ -133,19 +133,19 @@ sub ensure {
 	return;
 }
 
-# Register interest in the buffer reaching $need tracks.
+# Register interest in the queue reaching $need tracks.
 #
 # $cb->($satisfied, $reason), reason is 'filled' | 'ended' | 'timeout'.
-# Called once the buffer holds $need tracks, or the fill ends, or this
+# Called once it holds $need tracks, or the fill ends, or this
 # waiter's own budget runs out. This is how a 'nextbatch' that arrived while
-# the buffer was short turns into an asynchronous command: it parks here and
+# the queue was short turns into an asynchronous command: it parks here and
 # is resumed by _notify from inside the fill's callback.
 sub wait {
 	my ( $class, $playerid, $need, $cb ) = @_;
 
 	my $st = $state{$playerid};
 
-	# Nothing in flight and not enough buffered: report immediately rather
+	# Nothing in flight and not enough tracks: report immediately rather
 	# than leaving the caller suspended with nothing that could wake it.
 	unless ( $st && $st->{running} ) {
 		return $cb->( 0, 'ended' );
@@ -237,7 +237,7 @@ sub _step {
 
 	$st->{calls}++;
 
-	# The buffer itself is handed to the provider as its seed, so a provider
+	# The queue itself is handed to the provider as its client, so a provider
 	# that derives its selection from the current playlist sees this queue.
 	my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new( $playerid, Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) );
 
@@ -257,7 +257,7 @@ sub _step {
 		# Re-read the record before touching it.
 		#
 		# The provider call above was asynchronous, so a 'nextbatch' may have
-		# taken tracks out of the buffer while it was in flight. Writing back
+		# taken tracks out of the queue while it was in flight. Writing back
 		# the copy loaded before the call would undo that take, putting the
 		# tracks back where the next caller could be handed one of them a
 		# second time -- and a caching player would then download it twice.
@@ -288,7 +288,7 @@ sub _step {
 		if ( main::DEBUGLOG && $log->is_debug ) {
 			$log->debug("fill turn: room=$room providerReturned=" . scalar( @{ $urls || [] } )
 				. ' kept=' . scalar( @{ $expanded || [] } )
-				. " added=$added buffered=" . Plugins::RemotePlayerCompanion::DSTM::Queue->total($current)
+				. " added=$added tracks=" . Plugins::RemotePlayerCompanion::DSTM::Queue->total($current)
 				. " fruitless=$st->{empty} calls=$st->{calls}" );
 		}
 
@@ -315,7 +315,7 @@ sub _step {
 	return;
 }
 
-# Wake every waiter whose condition the buffer now meets, and every waiter
+# Wake every waiter whose condition the queue now meets, and every waiter
 # at all if the fill is over. Called after each append, and once more from
 # _finish/_abandon so that nothing is left suspended.
 sub _notify {
@@ -393,7 +393,7 @@ sub _finish {
 
 		$log->debug( "fill end: $playerid reason=" . ( defined $err ? $err : 'done' )
 			. ' calls=' . $st->{calls}
-			. ' buffered=' . ( $rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) : 0 ) );
+			. ' tracks=' . ( $rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) : 0 ) );
 	}
 
 	$class->_notify($playerid);

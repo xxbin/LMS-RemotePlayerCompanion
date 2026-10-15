@@ -1,9 +1,9 @@
 package Plugins::RemotePlayerCompanion::DSTM::Queue;
 
-# The queue: its records, and the buffer operations on them.
+# The queue: its records, and the operations on them.
 #
-# A record is a bounded rolling buffer of track URLs. The consumer takes
-# from the head (nextbatch) and Refill appends to the tail, so the buffer
+# A record is a bounded rolling window of track URLs. The consumer takes
+# from the head (nextbatch) and Refill appends to the tail, so the tracks
 # never exceeds 'max' and nothing is ever silently trimmed away.
 #
 # Records are keyed by playerid and never created implicitly: a record
@@ -88,7 +88,7 @@ sub create {
 	return $class->save($rec);
 }
 
-# What the provider should derive from: the seed plus whatever the buffer
+# What the provider should derive from: the seed plus whatever the queue
 # holds. The seed is not queue content -- see seed() below -- but a provider
 # that reads the queue should still see it, or a queue built around a track
 # would stop looking like it.
@@ -105,7 +105,7 @@ sub playlist {
 	return [ @{ $rec->{seed} || [] }, @{ $rec->{tracks} || [] } ];
 }
 
-# The derivation material an explicit seed set, as opposed to the buffer.
+# The derivation material an explicit seed set, as opposed to the queue.
 #
 # '||=' rather than a plain read is what lets a record written before this
 # field existed read as empty. That one line is why the cache namespace
@@ -134,10 +134,10 @@ sub destroy {
 	$cache->remove( _key($playerid) );
 }
 
-# --- buffer operations ----------------------------------------------------
+# --- operations on the queue ----------------------------------------------------
 
 # Append URLs, skipping anything this queue has already held or served, and
-# stopping once the buffer reaches $limit so it never overshoots 'max'.
+# stopping once the tracks reach $limit so it never overshoots 'max'.
 # Returns the number actually appended.
 sub add {
 	my ( $class, $rec, $urls, $limit ) = @_;
@@ -159,7 +159,7 @@ sub add {
 	$class->_pruneSeen($seen) if scalar( keys %{$seen} ) > SEEN_HARD;
 
 	# What went in and what that leaves. The caller logs its own view of a
-	# turn (see Refill), but a buffer can be appended to from more than one
+	# turn (see Refill), but a queue's tracks can be appended to from more than
 	# place, and this is the one that sees every append.
 	#
 	# `0 + $added` rather than `$added`: interpolating a scalar marks it as a
@@ -167,16 +167,16 @@ sub add {
 	# the mark would turn 25 into "25" on the wire. Arithmetic makes a new
 	# scalar, which the interpolation may mark instead.
 	main::DEBUGLOG && $log->is_debug && $log->debug(
-		'buffer add: ' . ( $rec->{playerid} || '?' )
+		'queue add: ' . ( $rec->{playerid} || '?' )
 		. ' offered=' . scalar( @{ $urls || [] } )
-		. " added=" . ( 0 + $added ) . " buffered=" . scalar( @{ $rec->{tracks} || [] } )
+		. " added=" . ( 0 + $added ) . " tracks=" . scalar( @{ $rec->{tracks} || [] } )
 		. ( defined $limit ? " limit=$limit" : '' )
 	);
 
 	return $added;
 }
 
-# Hand out up to $count URLs from the head of the buffer. They stay in the
+# Hand out up to $count URLs from the head. They stay in the
 # dedup memory so Refill cannot immediately re-serve the same track.
 sub take {
 	my ( $class, $rec, $count ) = @_;
@@ -189,11 +189,11 @@ sub take {
 
 	my $taken = [ splice @{$tracks}, 0, $count ];
 
-	# Consumption is the half of the buffer's life nothing else reports: a
+	# Consumption is the half of a queue's life nothing else reports: a
 	# queue that empties faster than it fills looks the same from the outside
 	# whether the provider is slow or the caller is taking too much.
 	main::DEBUGLOG && $log->is_debug && $log->debug(
-		'buffer take: ' . ( $rec->{playerid} || '?' )
+		'queue take: ' . ( $rec->{playerid} || '?' )
 		. " wanted=$wanted got=" . scalar( @{$taken} )
 		. ' left=' . scalar( @{$tracks} )
 	);
@@ -212,7 +212,7 @@ sub clear {
 	# The dedup memory goes with it, which is worth saying: a cleared queue may
 	# hand out tracks it has already served, and nothing else would explain it.
 	main::DEBUGLOG && $log->is_debug && $log->debug(
-		'buffer clear: ' . ( $rec->{playerid} || '?' )
+		'queue clear: ' . ( $rec->{playerid} || '?' )
 		. " dropped=" . ( 0 + $removed ) . " (dedup memory dropped too)"
 	);
 

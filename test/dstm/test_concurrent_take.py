@@ -3,7 +3,7 @@
 
 A refill calls its provider asynchronously, and takes happen meanwhile.
 Writing back the record as it stood before that call would undo the take: the
-taken tracks go back into the buffer and the next caller is handed one of
+taken tracks go back into the queue and the next caller is handed one of
 them again, which a caching player would download twice. This drives that
 window deliberately, by keeping a slow provider refilling while nextbatch
 keeps taking.

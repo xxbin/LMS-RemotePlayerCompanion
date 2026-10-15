@@ -6,7 +6,7 @@ Three behaviours that only make sense together:
 'forget' drops a queue's record, which is the only way to get back to the
 state a caller who has never used the plugin is in -- and the state these
 tests need to set up. Nothing else removes a record: 'clear' empties the
-buffer and keeps the record, and the record outlives a server restart.
+tracks and keeps the record, and the record outlives a server restart.
 
 'seed' rebuilds a queue rather than topping it up, so a queue that already
 holds enough is started over rather than left alone.
@@ -197,7 +197,7 @@ class NextbatchEstablishesTheQueue(DSTMTestCase):
                          "a batch request re-pointed the queue at the player's setting")
 
 
-class SeedOutlivesTheBuffer(DSTMTestCase):
+class SeedOutlivesTheTracks(DSTMTestCase):
     """A queue that has served anything always has something to derive from.
 
     A provider that derives its selection from the queue -- LastMix above all
@@ -228,7 +228,7 @@ class SeedOutlivesTheBuffer(DSTMTestCase):
         self.assertGreater(self.lms.state(self.playerid)[0], 0, "nothing to drain")
 
         # More than a queue can hold, so this takes all of it whatever is
-        # there. A batch that emptied the buffer and left nothing behind would
+        # there. A batch that emptied the queue and left nothing behind would
         # meet the next fill with nothing at all to derive from.
         self.lms.dstm("nextbatch", self.playerid, "count:50")
         wait_for_fill(self.lms, self.playerid, 45)

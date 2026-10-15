@@ -127,7 +127,7 @@ reported every provider as working.
 
 **Measuring something that had not happened yet.** `config` answers before
 the provider does, by design. An earlier version configured a provider and
-read the buffer on the next line, so it could only ever see the seed.
+read the queue on the next line, so it could only ever see the seed.
 Anything that waits on a fill has to actually wait for it.
 
 **Depending on a provider staying broken, or staying cooperative.**

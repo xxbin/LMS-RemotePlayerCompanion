@@ -29,10 +29,10 @@ class AsyncDelivery(DSTMTestCase):
     queue = "test-async"
 
     def _watch_a_fill(self, token):
-        """Seed, ask the provider for a deeper buffer, and watch it arrive.
+        """Seed, ask the provider for a deeper queue, and watch it arrive.
 
         Returns (seeded, growth, config_seconds, total_reported_by_config),
-        where growth is a time series of (seconds, buffered, filling, error).
+        where growth is a time series of (seconds, tracks held, filling, error).
         """
         seeded = self.seed(SEED_N)
         self.assertGreater(seeded, 0, "could not seed a queue")
@@ -74,11 +74,11 @@ class AsyncDelivery(DSTMTestCase):
                 "A provider may answer with an empty list, so this says nothing "
                 "about the plugin either way.")
 
-        self.assertGreater(growth[-1][1], seeded, f"the buffer stayed at {seeded}")
+        self.assertGreater(growth[-1][1], seeded, f"the queue stayed at {seeded}")
         self.assertLess(took, 5, "the command waited for the provider")
 
         # There used to be an assertion here that the answer reported the
-        # buffer as it was *before* the provider delivered. It cannot hold any
+        # queue as it was *before* the provider delivered. It cannot hold any
         # more, and its loss is real: adopting a provider is now seed's job,
         # and that is a second command after config, so by the time an answer
         # is composed the provider may legitimately have delivered. What is
@@ -89,7 +89,7 @@ class AsyncDelivery(DSTMTestCase):
         rows = r.get("queue_loop") or []
         urls = [x["url"] for x in rows]
 
-        self.assertEqual(len(urls), len(set(urls)), "the buffer holds duplicates")
+        self.assertEqual(len(urls), len(set(urls)), "the queue holds duplicates")
         self.assertIsNone(self.lms.state(self.playerid)[2],
                           "an error was recorded on the queue")
 

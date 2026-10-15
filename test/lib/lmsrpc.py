@@ -27,7 +27,7 @@ PORT = os.environ.get("LMS_PORT", DEFAULT_PORT)
 #: Makes this run's queues its own.
 #:
 #: The queue names are fixed per suite, so two runs against one server would
-#: otherwise work on the same queues -- one clearing the buffer the other is
+#: otherwise work on the same queues -- one clearing the tracks the other is
 #: waiting to see fill, and both reporting failures that belong to neither.
 #: It reads as a product fault, which is the worst way for a test to be wrong.
 RUN_ID = f"{os.getpid():x}"
@@ -100,7 +100,7 @@ class LMS:
         return self.dstm("clear", playerid)
 
     def state(self, playerid):
-        """(buffered, filling, last_error_code) -- what most suites look at."""
+        """(tracks held, filling, last_error_code) -- what most suites look at."""
         r = self.status(playerid)
         return (r.get("total", 0), r.get("filling"),
                 (r.get("last_error") or {}).get("code"))
@@ -364,7 +364,7 @@ def seed_queue(lms, playerid, token=SEED_TOKEN, count=10, cap=30):
 
     Providers that select from what the queue holds answer with nothing when
     it is empty, so they are tested against a seeded queue and measured by
-    what they add *beyond* it. Measuring the buffer's size instead would just
+    what they add *beyond* it. Measuring how much the queue holds instead would
     be measuring the seed.
 
     Waits for the fill to stop rather than for a fixed time: seeding is on the
@@ -373,7 +373,7 @@ def seed_queue(lms, playerid, token=SEED_TOKEN, count=10, cap=30):
 
     The provider is adopted from the player's own Dont Stop The Music setting,
     which has to be set first -- config no longer takes a token -- and seed is
-    what adopts it and fills the buffer from the plugin's own selection.
+    what adopts it and fills the queue from the plugin's own selection.
     """
     if not lms.set_provider(playerid, token):
         raise unittest.SkipTest(f"cannot set the DSTM provider for {playerid}")
@@ -382,7 +382,7 @@ def seed_queue(lms, playerid, token=SEED_TOKEN, count=10, cap=30):
     lms.dstm("config", playerid, f"max:{count}")
 
     # No count: seed fills to half the queue's depth and the provider's own
-    # fill carries it the rest of the way to max, so the buffer still ends up
+    # fill carries it the rest of the way to max, so the queue still ends up
     # holding `count`.
     lms.dstm("seed", playerid)
 
@@ -391,7 +391,7 @@ def seed_queue(lms, playerid, token=SEED_TOKEN, count=10, cap=30):
 
 
 def wait_for_count(lms, playerid, target, seconds):
-    """Poll until the buffer holds at least target, and return what it holds.
+    """Poll until the queue holds at least target, and return what it holds.
 
     Returns the count rather than a truth value: a predicate-based helper
     reads naturally but hands back whatever the predicate returned, which is
@@ -406,7 +406,7 @@ def wait_for_count(lms, playerid, target, seconds):
 
 
 def wait_for_fill(lms, playerid, seconds, quiet=1.0, interval=0.5):
-    """Wait for a fill to finish, and return (buffered, last_error).
+    """Wait for a fill to finish, and return (tracks held, last_error).
 
     A fill is deferred, so looking once and seeing an idle queue does not mean
     there is nothing to wait for -- it may be about to start. Two consecutive

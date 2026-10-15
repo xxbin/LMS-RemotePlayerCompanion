@@ -54,7 +54,7 @@ use constant QUEUE_PAGE    => 50;
 # Letters are LMS's own, from its tag map: 'y' year, 'd' duration, 't' track
 # number -- which is not the title, however easy that is to misread -- 'a'
 # artist, 'l' album, 'c' coverid. id and title come back whatever the tags say,
-# so they need no letter, and neither does url, which is set from the buffer.
+# so they need no letter, and neither does url, which is set from the queue.
 #
 # This is what a list carried before there was a tags parameter, plus coverid,
 # so that asking for nothing still gets no less than it used to.
@@ -171,7 +171,7 @@ sub cliSources {
 # privileged; the last one written is the one both sides read.
 #
 # Naming an **empty** one is the third case: it disables the queue, clearing the
-# provider from both places and emptying the buffer along with it. A `token:` the
+# provider from both places and emptying the queue along with it. A `token:` the
 # caller did not send at all is not that -- see the branch below.
 sub cliConfig {
 	my $request = shift;
@@ -237,8 +237,8 @@ sub cliConfig {
 			# whole point of _establish, and would undo this.
 			#
 			# The fill goes first, or its callbacks would write tracks into the
-			# buffer that is about to be emptied. The material goes with the
-			# buffer, there being nothing for a queue with no provider to derive
+			# queue that is about to be emptied. The material goes with it, there
+			# being nothing for a queue with no provider to derive
 			# from.
 			Plugins::RemotePlayerCompanion::DSTM::Refill->abandon($playerid);
 
@@ -319,7 +319,7 @@ sub cliNextbatch {
 	$count = 1 if $count < 1;
 	$count = MAX_COUNT if $count > MAX_COUNT;
 
-	# Never wait for more than the buffer could ever hold.
+	# Never wait for more than the queue could ever hold.
 	my $need  = $count < $rec->{max} ? $count : $rec->{max};
 	my $total = Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec);
 
@@ -327,7 +327,7 @@ sub cliNextbatch {
 		return _serve( $request, $playerid, $count, $need );
 	}
 
-	# The buffer is empty, so there is nothing to return. Make sure something
+	# The queue is empty, so there is nothing to return. Make sure something
 	# is being filled, then hold the request open until the fill satisfies us,
 	# gives up, or our own budget runs out.
 	Plugins::RemotePlayerCompanion::DSTM::Refill->ensure($playerid);
@@ -348,7 +348,7 @@ sub cliNextbatch {
 			main::DEBUGLOG && $log->is_debug
 				&& $log->debug( "nextbatch $playerid: gave up after "
 					. Plugins::RemotePlayerCompanion::DSTM::Refill::WAIT_BUDGET
-					. "s waiting for $need, with nothing buffered (SOURCE_TIMEOUT)" );
+					. "s waiting for $need, with no tracks (SOURCE_TIMEOUT)" );
 
 			return _fail( $request, 'SOURCE_TIMEOUT', 'no tracks within the wait budget' );
 		}
@@ -454,7 +454,7 @@ sub cliClear {
 # This is the only way back to the state a caller who has never used the plugin
 # is in, and that is what it is for: a record outlives a server restart, and
 # nothing else removes one. 'clear' is the other half of the pair -- it empties
-# the buffer and leaves the queue configured.
+# the tracks and leaves the queue configured.
 #
 # The player's own Dont Stop The Music setting is left alone. That setting
 # belongs to the player rather than to this queue, and it is where the next
@@ -500,10 +500,10 @@ sub cliForget {
 #
 # Not every provider wants one: RatingsLight selects from the whole library,
 # and the PLUGIN_RANDOM_* family answers with a recipe the plugin expands
-# itself, so a queue pointed at those is fine with an empty buffer. They still
+# itself, so a queue pointed at those is fine with an empty one. They still
 # need this, because it is what adopts the provider.
 #
-# **It starts the queue over rather than topping it up.** The buffer and the
+# **It starts the queue over rather than topping it up.** The tracks and the
 # material a previous seed established are both discarded, because a queue
 # that kept either would go on deriving from a provider -- or a track -- that
 # the caller has moved on from. So this is not safe to call on a queue that is
@@ -630,10 +630,10 @@ sub _establish {
 				? "built around $url"
 				: "filled " . ( 0 + $added ) . " of $target from the plugin's own selection" )
 			. ", dropped $dropped"
-			. ', buffered=' . Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec)
+			. ', tracks=' . Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec)
 	);
 
-	# Seeding is a change to the buffer like any other, so from here the queue
+	# Seeding is a change to the queue like any other, so from here it
 	# tops itself up from its own provider in the ordinary way -- which is the
 	# point: it now has the seed that provider needed.
 	Plugins::RemotePlayerCompanion::DSTM::Refill->ensure($playerid);
@@ -664,12 +664,12 @@ sub cliSeed {
 
 # The track a named seed refers to: ( $url, $error, $message ).
 #
-# No url and no id is not an error -- it is the request to fill a buffer, which
+# No url and no id is not an error -- it is the request to fill a queue, which
 # is what seed did before it could name a track, so all three come back empty
 # and the caller carries on.
 #
 # A URL that cannot be resolved is an error rather than something to ignore:
-# DSTM turns buffer URLs into tracks with objectForUrl, and a URL it cannot
+# DSTM turns the queue's URLs into tracks with objectForUrl, and a URL it cannot
 # resolve yields nothing, which for a provider deriving from the queue is the
 # same silent failure as an empty queue. Refusing says so out loud.
 sub _trackUrl {
@@ -759,10 +759,10 @@ sub _serve {
 
 	# The seed follows the queue. Whatever this batch handed over last is what
 	# the queue is about now, and it is what the next fill derives from --
-	# whether or not this batch was the one that emptied the buffer.
+	# whether or not this batch was the one that emptied the queue.
 	#
 	# That it is a track already handed out is the point, and it costs nothing:
-	# it has left the buffer, so it cannot be served twice, and it is in the
+	# it has left the queue, so it cannot be served twice, and it is in the
 	# dedup memory besides. What it buys is that the material never runs out --
 	# a queue that has served anything always has something to derive from, and
 	# a provider handed an empty queue does not merely answer with nothing:
@@ -804,7 +804,7 @@ sub _serve {
 	# player or quietly falling behind.
 	main::DEBUGLOG && $log->is_debug && $log->debug(
 		"nextbatch $playerid: handed out " . scalar(@batch) . " of $count asked for"
-			. ', buffered=' . Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec)
+			. ', tracks=' . Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec)
 			. ', source=' . ( $rec->{provider} || 'none' )
 			. ', filling=' . Plugins::RemotePlayerCompanion::DSTM::Refill->isFilling($playerid)
 	);
@@ -858,9 +858,9 @@ sub _trackInfo {
 
 	return { url => $url } unless $info && ref $info eq 'HASH';
 
-	# The url the buffer handed out, not the one the database holds. They can
+	# The url the queue handed out, not the one the database holds. They can
 	# differ -- a cue sheet gives a url a #start-end suffix -- and it is the
-	# buffer's that the player has to be able to fetch.
+	# queue's that the player has to be able to fetch.
 	$info->{url} = $url;
 
 	return $info;
