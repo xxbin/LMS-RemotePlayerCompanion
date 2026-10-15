@@ -263,14 +263,14 @@ meets them.
 ### The order to call them in
 
 One thing is needed and everything else is optional or a repeat: **a queue that
-has a provider and something to work from**. One call gets there — there are three
-that do it, and any of them can be the first.
+has a provider and something to work from**. Three calls can establish one, and
+they are the first three below.
 
 | | Step | |
 |---|---|---|
 | 0 | `sources playerid:<id>` | optional — what there is to point a queue at |
-| 1 | `seed playerid:<id> [url:<u> \| id:<n>]` | **required once**, unless `config token:` names a provider or `nextbatch` is left to establish the queue itself — adopts the provider the player is set to, and creates the queue |
-| 2 | `config playerid:<id> [token:<T>] [max:<N>]` | optional — `token:` is the other way in, and creates the queue too; `max` is the buffer depth, 50 unless said |
+| 1 | `config playerid:<id> [token:<T>] [max:<N>]` | optional — `token:` names a provider, and **overwrites the one the player has in LMS**; without it the queue uses that setting as it stands. `max` is the buffer depth, 50 unless said |
+| 2 | `seed playerid:<id> [url:<u> \| id:<n>]` | **required once**, unless `config token:` named a provider or `nextbatch` is left to establish the queue itself — adopts the provider the player is set to, and creates the queue |
 | 3 | `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | the loop — call it whenever the player wants more |
 | 4 | `queue`, `status` | optional, any time — both read-only |
 | 5 | `clear`, `forget playerid:<id>` | optional — `clear` empties the buffer, `forget` drops the queue's record |
@@ -278,11 +278,16 @@ that do it, and any of them can be the first.
 A queue draws from the provider **the player** is set to, which is why `seed`
 takes no token: it adopts that setting.
 
-Seeding first is the intended order, and it is worth doing even though nothing
-below insists on it. A seed can name the track the queue is to be built around,
-which `nextbatch` cannot, so the queue `nextbatch` establishes for itself is built
-from the plugin's own random selection instead. Seeding is also the deliberate
-moment at which a queue is started over.
+**Config, then seed, then nextbatch** is the order this is meant to be used in.
+`config` says which provider the queue should draw from — and, since it writes the
+player's own setting too, which one the player should; `seed` adopts that and gives
+the queue something to work from; `nextbatch` is the loop from then on.
+
+Seeding is worth doing deliberately rather than leaving it to `nextbatch`, even
+though nothing below insists on it. A seed can name the track the queue is to be
+built around, which `nextbatch` cannot, so the queue `nextbatch` establishes for
+itself is built from the plugin's own random selection instead. Seeding is also the
+deliberate moment at which a queue is started over.
 
 What is left is one call that works on its own. With the player already set to a
 provider in LMS:
@@ -360,7 +365,7 @@ token, or empty for a queue with no provider.
 
 Fails with `DSTM_DISABLED` when Dont Stop The Music is not enabled.
 
-### `config` — the queue's depth, and its provider
+### `config` — the queue's depth, and the provider the player uses
 
 ```
 ["", ["remoteplayercompanion", "dstm", "config", "playerid:02:00:79:b3:5d:7c",
@@ -369,7 +374,7 @@ Fails with `DSTM_DISABLED` when Dont Stop The Music is not enabled.
 
 | Parameter | Default | |
 |---|---|---|
-| `token` | — | A provider to point the queue at, or empty to disable the queue. Written to the record **and** to the player's own Dont Stop The Music setting |
+| `token` | — | A provider to point the queue at, empty to disable the queue, or omitted to leave the player's own configuration alone |
 | `max` | 50 | Buffer depth, 1–100. Persisted, so it survives a restart |
 
 ```json
@@ -379,6 +384,19 @@ Fails with `DSTM_DISABLED` when Dont Stop The Music is not enabled.
 `total` is the buffer at the moment of the answer. On a queue being configured for
 the first time it is `0`, because `config` starts no fill: that is not a failure,
 and it is not a reason to read the buffer again on the next line.
+
+**`token:` is about the system's Dont Stop The Music configuration, not only about
+this queue.** Naming a provider writes it to two places: the queue's record, and
+the player's own `plugin.dontstopthemusic:provider` setting — the same setting
+LMS's Dont Stop The Music pages read and write. So it does not merely point one
+queue somewhere: it **overwrites the provider that player is configured with**, and
+LMS's own screens will show the new one afterwards. Configuring a queue for a
+player changes that player.
+
+Leaving `token:` out is what leaves that configuration alone, and it is why the
+parameter is described as optional: a queue with no provider of its own adopts the
+player's, so what it uses is the system's configuration as it stands. That is also
+why `seed` takes no token of its own.
 
 **An empty `token:` disables the queue.** Sending no provider is not the same as
 sending none: `config max:` on its own leaves the queue's provider alone, where
