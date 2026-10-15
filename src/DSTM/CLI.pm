@@ -203,22 +203,16 @@ sub cliConfig {
 
 	if ( defined $token ) {
 
-		my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new(
-			$playerid, Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) );
-
 		if ( length $token ) {
 
-			# Checked before either is written, so a refused provider leaves both
-			# the queue and the player as they were.
+			my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new(
+				$playerid, Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) );
+
+			# Checked before it is written, so a refused provider leaves the queue
+			# as it was.
 			my ( $ok, $err ) = Plugins::RemotePlayerCompanion::DSTM::Provider->check( $vClient, $token );
 
 			return _fail( $request, $err, _providerMessage( $err, $playerid ) ) unless $ok;
-
-			# The player first, then the record: if the second write fails the
-			# player is merely set to what was asked for, which is harmless, while
-			# the other order could leave a queue drawing from a provider the
-			# player is not set to.
-			Plugins::RemotePlayerCompanion::DSTM::Provider->assign( $vClient, $token );
 
 			$rec->{provider} = $token;
 		}
@@ -229,20 +223,10 @@ sub cliConfig {
 			# `token:` at all -- `max:` on its own -- leaves the queue's provider
 			# alone, and that is what makes this worth distinguishing.
 			#
-			# It has to reach the player's own setting too, and as '0' rather than
-			# by removing the key: '0' is what Dont Stop The Music's own settings
-			# write for "none". Left standing, the provider would be adopted
-			# straight back, because a queue with no provider establishes one from
-			# the player the next time anything asks it for tracks -- which is the
-			# whole point of _establish, and would undo this.
-			#
 			# The fill goes first, or its callbacks would write tracks into the
 			# queue that is about to be emptied. The material goes with it, there
-			# being nothing for a queue with no provider to derive
-			# from.
+			# being nothing for a queue with no provider to derive from.
 			Plugins::RemotePlayerCompanion::DSTM::Refill->abandon($playerid);
-
-			Plugins::RemotePlayerCompanion::DSTM::Provider->assign( $vClient, '0' );
 
 			$rec->{provider} = undef;
 
@@ -517,47 +501,27 @@ sub cliForget {
 sub _establish {
 	my ( $request, $playerid, $what ) = @_;
 
-	# A queue that already has a provider keeps it, unless `seed` is what is
-	# asking. Re-seeding is how a provider the player has changed since gets
-	# picked up, which is why seed always adopts; nextbatch, establishing a
-	# queue it found with nothing to serve from, is only giving that queue
-	# material, and a batch request is no place to re-point somebody's queue.
-	my $repoint = ( $what eq 'seed' );
-
 	my $rec = Plugins::RemotePlayerCompanion::DSTM::Queue->load($playerid);
 
-	my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new(
-		$playerid,
-		$rec ? Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) : [],
-	);
+	# **A queue's provider is the queue's.** Nothing here adopts one from the
+	# player: that setting belongs to Dont Stop The Music and decides what LMS
+	# itself does for that player, so it is neither ours to read nor to write.
+	# A queue with no provider is refused, and `config token:` is how it gets one.
+	#
+	# Resolving the token needs no setting of the player's either -- see the
+	# note on that in Provider, where the token is swapped into a throwaway
+	# client of our own for the length of the call.
+	my $token = $rec && $rec->{provider};
 
-	my ( $token, $providerErr );
-
-	if ( $rec && $rec->{provider} && !$repoint ) {
-		$token = $rec->{provider};
-
+	unless ($token) {
 		main::DEBUGLOG && $log->is_debug
-			&& $log->debug("$what $playerid: keeping provider $token");
+			&& $log->debug("$what $playerid: no provider configured (NO_PROVIDER)");
+
+		return ( 0, 'NO_PROVIDER', _providerMessage( 'NO_PROVIDER', $playerid ) );
 	}
-	else {
-		( $token, $providerErr ) =
-			Plugins::RemotePlayerCompanion::DSTM::Provider->adopted($vClient);
 
-		if ($providerErr) {
-			main::DEBUGLOG && $log->is_debug
-				&& $log->debug("$what $playerid: no provider to adopt ($providerErr)");
-
-			return ( 0, $providerErr, _providerMessage( $providerErr, $playerid ) );
-		}
-
-		# **The token, which a caller cannot see from anywhere else.** A queue
-		# draws from the provider the *player* was set to when it was seeded,
-		# and goes on drawing from it after that setting changes, so the queue's
-		# provider and the player's can differ. This is the only line that says
-		# which one this queue took.
-		main::DEBUGLOG && $log->is_debug
-			&& $log->debug("$what $playerid: adopted provider $token");
-	}
+	main::DEBUGLOG && $log->is_debug
+		&& $log->debug("$what $playerid: provider $token");
 
 	my ( $url, $urlErr, $urlMessage ) = _trackUrl($request);
 
@@ -702,17 +666,16 @@ sub _trackUrl {
 sub _providerMessage {
 	my ( $code, $playerid ) = @_;
 
-	return "no Don't Stop The Music provider is set for $playerid; "
-		. "set one for that player in LMS"
+	return "no provider is configured for $playerid; "
+		. "run config with a token to give it one"
 		if $code eq 'NO_PROVIDER';
 
-	return "the provider set for $playerid is not one Dont Stop The Music "
-		. "knows any more; pick another for that player in LMS"
+	return "that token is not one Dont Stop The Music knows; "
+		. "run sources to see what it offers"
 		if $code eq 'UNKNOWN_PROVIDER';
 
-	return "the provider set for $playerid is not one a queue can use: it is "
-		. "a single favourite rather than a mix. Run sources to see what can "
-		. "be used, and set one of those for the player in LMS"
+	return "that token is not one a queue can use: it is a single favourite "
+		. "rather than a mix. Run sources to see what can be used"
 		if $code eq 'PROVIDER_NOT_OFFERED';
 
 	return "Don't Stop The Music is not enabled";

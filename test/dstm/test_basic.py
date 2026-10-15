@@ -27,22 +27,20 @@ class Refusals(DSTMTestCase):
         self.assertEqual(r.get("configured"), 0)
 
     def test_nextbatch_on_a_playerid_lms_does_not_know_is_refused(self):
-        """nextbatch now establishes a queue for itself when there is none to
-        serve from, so what it cannot get past is not a missing queue but a
-        missing provider. An id LMS has no player for can never carry a Dont
-        Stop The Music setting, so it is refused -- and NO_PROVIDER is the
-        honest code: the caller's step is to name a player, not to seed one."""
+        """An id no queue has been configured for has no provider, and nothing
+        invents one, so it is refused. NO_PROVIDER is the honest code: the
+        caller's step is to configure a queue, not to seed one."""
         r = self.lms.dstm("nextbatch", "no-such-player")
         self.assertEqual(code_of(r), "NO_PROVIDER")
 
     def test_unknown_provider_token_is_refused(self):
-        """The token now comes from the player's own DSTM setting, so that is
-        where an unknown one has to be put for seed to refuse it."""
-        self.lms.set_provider(self.playerid, "NO_SUCH_TOKEN_XYZ")
-
-        r = self.lms.dstm("seed", self.playerid)
+        """A token Dont Stop The Music does not know is refused where it is
+        named, and a queue is not left behind by the refusal."""
+        r = self.lms.dstm("config", self.playerid, "token:NO_SUCH_TOKEN_XYZ")
 
         self.assertEqual(code_of(r), "UNKNOWN_PROVIDER")
+        self.assertEqual(self.lms.status(self.playerid).get("provider"), "",
+                         "a refused token was written to the queue anyway")
 
     def test_a_provider_that_is_not_offered_is_refused(self):
         """DSTM's registry holds one entry per favourite as well as the real
@@ -54,9 +52,7 @@ class Refusals(DSTMTestCase):
         if not favourite:
             self.skipTest("this server has no non-offered provider to try")
 
-        self.lms.set_provider(self.playerid, favourite)
-
-        r = self.lms.dstm("seed", self.playerid)
+        r = self.lms.dstm("config", self.playerid, f"token:{favourite}")
 
         self.assertEqual(code_of(r), "PROVIDER_NOT_OFFERED")
 
@@ -64,34 +60,46 @@ class Refusals(DSTMTestCase):
         r = self.lms.dstm("config", self.playerid, "max:0")
         self.assertEqual(code_of(r), "BAD_MAX")
 
-    def test_config_sets_the_players_own_provider_too(self):
-        """Both are sources, so naming one here has to reach both.
+    def test_config_leaves_the_players_own_setting_alone(self):
+        """A queue's provider is the queue's.
 
-        Otherwise a queue configured through the plugin would draw from one
-        provider while the player it is named for drew from another.
+        What Dont Stop The Music has that player set to is its own business: this
+        plugin resolves the token it wants through a throwaway client of its own,
+        so it never needs the player's setting, and has no business writing it.
         """
         before = self.lms.get_provider(self.playerid)
 
         r = self.lms.dstm("config", self.playerid, f"token:{SEED_TOKEN}")
 
         self.assertIsNone(code_of(r), f"config refused: {r}")
-        self.assertEqual(self.lms.get_provider(self.playerid), SEED_TOKEN,
-                         "the player's own DSTM setting was not written")
         self.assertEqual(r.get("provider"), SEED_TOKEN,
                          "the queue's record was not written")
+        self.assertEqual(self.lms.get_provider(self.playerid), before,
+                         "config wrote the player's own DSTM setting")
 
-    def test_a_refused_provider_writes_neither_side(self):
-        """Checked before either is written, so a refusal leaves the queue and
-        the player exactly as they were."""
+    def test_the_players_own_setting_does_not_decide_a_queues_provider(self):
+        """Nothing adopts it any more, so a queue with no provider of its own is
+        refused rather than given the one the player happens to be set to."""
+        if not self.lms.set_provider(self.playerid, SEED_TOKEN):
+            self.skipTest(f"cannot set the DSTM provider for {self.playerid}")
+
+        self.lms.dstm("forget", self.playerid)
+        self.lms.dstm("config", self.playerid, "max:20")
+
+        r = self.lms.dstm("seed", self.playerid)
+
+        self.assertEqual(code_of(r), "NO_PROVIDER",
+                         "seed adopted the player's setting instead of refusing")
+
+    def test_a_refused_provider_leaves_the_queue_alone(self):
+        """Checked before it is written, so a refusal changes nothing."""
         self.lms.dstm("config", self.playerid, f"token:{SEED_TOKEN}")
-        before = self.lms.get_provider(self.playerid)
+        before = self.lms.status(self.playerid).get("provider")
         self.assertEqual(before, SEED_TOKEN, "could not set up the precondition")
 
         r = self.lms.dstm("config", self.playerid, "token:NO_SUCH_TOKEN_XYZ")
 
         self.assertEqual(code_of(r), "UNKNOWN_PROVIDER")
-        self.assertEqual(self.lms.get_provider(self.playerid), before,
-                         "a refused token was written to the player anyway")
         self.assertEqual(self.lms.status(self.playerid).get("provider"), before,
                          "a refused token was written to the queue anyway")
 
@@ -110,16 +118,13 @@ class Refusals(DSTMTestCase):
                          "the queue itself was dropped rather than disabled")
 
     def test_disabling_a_queue_survives_the_next_request(self):
-        """The player's own setting is cleared along with the queue's. Left
-        standing, the next request would adopt it straight back -- which is what
-        a queue that is nothing but a playerid does whenever it has no
-        provider."""
+        """Nothing adopts a provider from anywhere, so a queue with none keeps
+        none: the next request finds nothing to serve from and says so, rather
+        than establishing a queue again."""
         self.use_provider(SEED_TOKEN, 30)
 
         self.lms.dstm("config", self.playerid, "token:")
 
-        self.assertIsNone(self.lms.get_provider(self.playerid),
-                          "the player's own setting still names a provider")
         self.assertEqual(code_of(self.lms.dstm("nextbatch", self.playerid)),
                          "NO_PROVIDER",
                          "nextbatch established a queue again rather than finding none")

@@ -371,15 +371,18 @@ def seed_queue(lms, playerid, token=SEED_TOKEN, count=10, cap=30):
     critical path of every provider a sweep tries, and a fixed wait there
     costs minutes.
 
-    The provider is adopted from the player's own Dont Stop The Music setting,
-    which has to be set first -- config no longer takes a token -- and seed is
-    what adopts it and fills the queue from the plugin's own selection.
+    The queue is configured with a token and then seeded, which is the order
+    the documentation gives: config says which provider, seed gives the queue
+    something to work from, and nothing anywhere reads the player's own Dont
+    Stop The Music setting.
     """
-    if not lms.set_provider(playerid, token):
-        raise unittest.SkipTest(f"cannot set the DSTM provider for {playerid}")
-
     lms.clear(playerid)
-    lms.dstm("config", playerid, f"max:{count}")
+
+    # The provider is named on the queue rather than on the player: a queue's
+    # provider is its own now, and nothing adopts the player's DSTM setting.
+    r = lms.dstm("config", playerid, f"token:{token}", f"max:{count}")
+    if (r.get("error") or {}).get("code"):
+        raise unittest.SkipTest(f"cannot configure {token}: {r['error']['code']}")
 
     # No count: seed fills to half the queue's depth and the provider's own
     # fill carries it the rest of the way to max, so the queue still ends up

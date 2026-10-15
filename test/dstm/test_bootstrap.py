@@ -11,10 +11,10 @@ tracks and keeps the record, and the record outlives a server restart.
 'seed' rebuilds a queue rather than topping it up, so a queue that already
 holds enough is started over rather than left alone.
 
-'nextbatch' establishes a queue itself when there is none to serve from, so a
-caller whose player is already set to a provider in LMS can ask for a batch
-as its first call. What it cannot do is invent a provider: a player set to
-none is refused with NO_PROVIDER, which names the setting to go and make.
+'nextbatch' gives a queue the material it lacks, so a queue configured but not
+yet seeded can be asked for a batch as its first call. What it cannot do is
+invent a provider: a queue with none is refused with NO_PROVIDER, which names
+config as the way to give it one.
 """
 
 import os
@@ -96,50 +96,20 @@ class SeedRebuildsTheQueue(DSTMTestCase):
 class NextbatchEstablishesTheQueue(DSTMTestCase):
     queue = "test-bootstrap"
 
-    def _set_provider(self, token):
-        if not self.lms.set_provider(self.playerid, token):
-            self.skipTest(f"cannot set the DSTM provider for {self.playerid}")
-
-    def test_nextbatch_establishes_a_queue_nobody_seeded(self):
-        """A caller whose player is already set to a provider in LMS can ask
-        for a batch without configuring or seeding anything first."""
+    def test_nextbatch_on_a_queue_with_no_provider_is_refused(self):
+        """There is no provider to be had from anywhere -- a queue's provider is
+        the queue's, and config is the only thing that gives it one -- so a
+        caller that has not configured a queue is told so rather than served."""
         self.lms.dstm("forget", self.playerid)
-        self._set_provider(SEED_TOKEN)
-
-        r = self.lms.dstm("nextbatch", self.playerid, "count:5")
-
-        self.assertIsNone((r.get("error") or {}).get("code"),
-                          f"nextbatch refused instead of bootstrapping: {r.get('error')}")
-        self.assertGreater(r.get("count", 0), 0, "bootstrapped but handed out nothing")
-
-    def test_a_bootstrapped_queue_is_a_configured_one_afterwards(self):
-        """It does not re-bootstrap on every call: the second call finds the
-        queue the first one established."""
-        self.lms.dstm("forget", self.playerid)
-        self._set_provider(SEED_TOKEN)
-
-        self.lms.dstm("nextbatch", self.playerid, "count:5")
-
-        status = self.lms.status(self.playerid)
-        self.assertEqual(status.get("configured"), 1)
-        self.assertEqual(status.get("provider"), SEED_TOKEN)
-
-    def test_nextbatch_on_a_player_with_no_provider_says_which_setting_to_make(self):
-        """What bootstrapping cannot do is invent a provider. NOT_CONFIGURED
-        would say the caller forgot a step; NO_PROVIDER says the player's own
-        Dont Stop The Music setting is the thing to go and set."""
-        self.lms.dstm("forget", self.playerid)
-        self._set_provider("0")          # DSTM's own "none"
 
         r = self.lms.dstm("nextbatch", self.playerid, "count:5")
 
         self.assertEqual((r.get("error") or {}).get("code"), "NO_PROVIDER")
 
-    def test_a_refused_bootstrap_leaves_no_queue_behind(self):
-        """Refusing must not be a way to half-configure a queue: the caller
-        gets NO_PROVIDER and the next attempt starts from the same place."""
+    def test_a_refused_request_leaves_no_queue_behind(self):
+        """Refusing must not be a way to half-configure a queue: the caller gets
+        NO_PROVIDER and the next attempt starts from the same place."""
         self.lms.dstm("forget", self.playerid)
-        self._set_provider("0")
 
         self.lms.dstm("nextbatch", self.playerid, "count:5")
 
@@ -150,7 +120,8 @@ class NextbatchEstablishesTheQueue(DSTMTestCase):
         from: `config token:` sets the provider and, deliberately, leaves the
         queue empty. Asking for a batch is then asking a provider that derives
         from the queue to derive from nothing, which for LastMix is fatal. So
-        nextbatch gives the queue material the same way it gives it a provider.
+        nextbatch gives the queue the material it lacks, keeping the provider it
+        already has.
         """
         token = lastmix_token(self.lms, self.playerid)
         if not token:
@@ -171,25 +142,20 @@ class NextbatchEstablishesTheQueue(DSTMTestCase):
         self.assertTrue(r.get("batch_loop"),
                         "established a queue but handed out nothing")
 
-    def test_establishing_a_queue_leaves_the_provider_it_already_had(self):
-        """config writes a provider both ways, so a queue and its player agree
-        -- until somebody changes the player's setting in LMS. A batch request
-        is no place to notice that: it gives a queue the material it lacks, and
-        leaves the provider it draws from alone. seed is the command that
-        deliberately picks up a changed setting."""
+    def test_a_batch_request_leaves_the_queues_provider_alone(self):
+        """The provider is the queue's and nothing else's. Whatever the player
+        is set to in LMS, and whatever else changes around it, a queue goes on
+        drawing from the one it was configured with."""
         kept = lastmix_token(self.lms, self.playerid)
 
         if not kept or kept == SEED_TOKEN:
             self.skipTest("no second provider to tell the queue's own from")
 
         self.lms.dstm("forget", self.playerid)
-
-        # The queue is given one provider...
         self.lms.dstm("config", self.playerid, f"token:{kept}", "max:50")
 
-        # ...and the player's own setting is then made to say something else.
-        if not self.lms.set_provider(self.playerid, SEED_TOKEN):
-            self.skipTest(f"cannot set the DSTM provider for {self.playerid}")
+        # The player's own setting, meanwhile, says something else entirely.
+        self.lms.set_provider(self.playerid, SEED_TOKEN)
 
         r = self.lms.dstm("nextbatch", self.playerid, "count:5", timeout=90)
 
@@ -215,10 +181,12 @@ class SeedOutlivesTheTracks(DSTMTestCase):
         if not token:
             self.skipTest("no LastMix provider is registered to try this with")
 
-        if not self.lms.set_provider(self.playerid, token):
-            self.skipTest(f"cannot set the DSTM provider for {self.playerid}")
-
         self.lms.dstm("forget", self.playerid)
+
+        r = self.lms.dstm("config", self.playerid, f"token:{token}", "max:50")
+        if (r.get("error") or {}).get("code"):
+            self.skipTest(f"cannot configure {token}: {r['error']['code']}")
+
         self.lms.dstm("seed", self.playerid)
 
         # Settled first, so that the drain below is what starts the next fill

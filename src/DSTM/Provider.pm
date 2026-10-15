@@ -94,50 +94,6 @@ sub isOffered {
 	return scalar grep { $_ eq $token } EXTRA_TOKENS;
 }
 
-# The provider this player is set to, if it is one a queue may use.
-#
-# Returns ( $token, $error ). The token is undef exactly when $error is set.
-#
-# Checked against the same whitelist 'sources' offers. The registry carries one
-# entry per favourite alongside the real providers, and a queue pointed at one
-# of those is pointed at a single favourite rather than at a mix -- and DSTM's
-# own per-player setting will happily hold one, because that setting was not
-# written with this queue in mind.
-sub adopted {
-	my ( $class, $vClient ) = @_;
-
-	my $token = $class->stored($vClient);
-
-	unless ($token) {
-		# Stated neutrally on purpose: stored() also answers undef when Dont
-		# Stop The Music is not enabled at all, so this is "nothing came back"
-		# rather than "nothing was set".
-		main::DEBUGLOG && $log->is_debug
-			&& $log->debug( 'no provider adopted for ' . $vClient->id . ' (NO_PROVIDER)' );
-
-		return ( undef, 'NO_PROVIDER' );
-	}
-
-	my ( $ok, $err ) = $class->check( $vClient, $token );
-
-	return ( undef, $err ) unless $ok;
-
-	return ( $token, undef );
-}
-
-# What the player's own Dont Stop The Music setting says, or undef.
-#
-# Truthiness, not definedness: DSTM's own settings write the string '0' for
-# their "none" choice, and DSTM reads this back through `|| ''` -- so '0' is
-# false there, and it has to be false here too or we would go looking for a
-# provider literally named 0.
-sub stored {
-	my ( $class, $vClient ) = @_;
-
-	return unless $class->available;
-
-	return preferences('plugin.dontstopthemusic')->client($vClient)->get('provider') || undef;
-}
 
 # May a queue be pointed at this token? Returns ( $ok, $error ).
 #
@@ -172,19 +128,6 @@ sub check {
 	return ( 1, undef );
 }
 
-# Put a provider into the player's own setting.
-#
-# This writes another plugin's preference, which is deliberate: the queue and
-# the player are then set to the same provider, so the player keeps behaving
-# the way its queue does. It is also what makes a queue configurable without
-# going into LMS's UI.
-sub assign {
-	my ( $class, $vClient, $token ) = @_;
-
-	preferences('plugin.dontstopthemusic')->client($vClient)->set('provider', $token);
-
-	return 1;
-}
 
 # Resolve the record's provider and call it. $cb->($urls, $error) fires
 # exactly once, either synchronously (handler answered inline) or later
