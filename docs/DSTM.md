@@ -7,7 +7,7 @@ answer with, and what they fail with.
 It is written for whoever works on this next, so the mechanics come first. Most of
 the commands only make sense once the fill is understood, and several of the
 design decisions are only explicable in terms of it. The command reference follows,
-and the advice about which provider to point a queue at is at the end.
+and the advice about which provider to give a queue is at the end.
 
 ## What it is
 
@@ -268,7 +268,7 @@ they are the first three below.
 
 | | Step | |
 |---|---|---|
-| 0 | `sources playerid:<id>` | optional — what there is to point a queue at |
+| 0 | `sources playerid:<id>` | optional — which providers `config` can be given |
 | 1 | `config playerid:<id> [token:<T>] [max:<N>]` | optional — `token:` names a provider, and **overwrites the one the player has in LMS**; without it the queue uses that setting as it stands. `max` is the buffer depth, 50 unless said |
 | 2 | `seed playerid:<id> [url:<u> \| id:<n>]` | **required once**, unless `config token:` named a provider or `nextbatch` is left to establish the queue itself — adopts the provider the player is set to, and creates the queue |
 | 3 | `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | the loop — call it whenever the player wants more |
@@ -341,7 +341,7 @@ Both modes start over, and they differ only in what replaces what:
   is not meant to line up with `nextbatch`'s default of 10: the two answer
   different questions.
 
-### `sources` — what there is to point a queue at
+### `sources` — the providers `config` can be given
 
 ```
 ["", ["remoteplayercompanion", "dstm", "sources", "playerid:02:00:79:b3:5d:7c"]]
@@ -356,6 +356,13 @@ Both modes start over, and they differ only in what replaces what:
   "sources_loop": [ { "token": "PLUGIN_RANDOM_TRACK", "name": "Song Mix",
                       "selected": 0 }, … ] }
 ```
+
+`sources` lists the providers this plugin will accept, which are the ones
+`config token:` takes: each entry's `token` is the value to pass there, and the
+list is how a caller finds out what is available without having to know DSTM's own
+names for things. A queue does not have to be given one of these — `config` takes
+any token DSTM knows, and turns away the ones a queue cannot use — but these are
+the ones worth choosing from.
 
 `count` is how many were listed and `hidden` how many were left out —
 [A note on `sources`](#a-note-on-sources) has the reason and the rule. `selected`
