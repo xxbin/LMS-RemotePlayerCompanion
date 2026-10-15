@@ -95,6 +95,35 @@ class Refusals(DSTMTestCase):
         self.assertEqual(self.lms.status(self.playerid).get("provider"), before,
                          "a refused token was written to the queue anyway")
 
+    def test_an_empty_token_disables_the_queue(self):
+        """`token:` names a provider; an empty one says there should not be one,
+        which is not the same as saying nothing. Saying nothing leaves whatever
+        provider the queue has alone -- that is what `max:` on its own does."""
+        self.use_provider(SEED_TOKEN, 30)
+        wait_for_count(self.lms, self.playerid, 1, 30)
+
+        r = self.lms.dstm("config", self.playerid, "token:")
+
+        self.assertEqual(r.get("provider"), "", "the queue kept its provider")
+        self.assertEqual(r.get("total"), 0, "the buffer was left behind")
+        self.assertEqual(self.lms.status(self.playerid).get("configured"), 1,
+                         "the queue itself was dropped rather than disabled")
+
+    def test_disabling_a_queue_survives_the_next_request(self):
+        """The player's own setting is cleared along with the queue's. Left
+        standing, the next request would adopt it straight back -- which is what
+        a queue that is nothing but a playerid does whenever it has no
+        provider."""
+        self.use_provider(SEED_TOKEN, 30)
+
+        self.lms.dstm("config", self.playerid, "token:")
+
+        self.assertIsNone(self.lms.get_provider(self.playerid),
+                          "the player's own setting still names a provider")
+        self.assertEqual(code_of(self.lms.dstm("nextbatch", self.playerid)),
+                         "NO_PROVIDER",
+                         "nextbatch established a queue again rather than finding none")
+
 
 class Queue(DSTMTestCase):
     """Filling, taking and emptying one queue."""

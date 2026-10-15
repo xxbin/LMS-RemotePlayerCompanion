@@ -169,6 +169,10 @@ sub cliSources {
 # whatever the player is set to, so a provider chosen in LMS works, and this
 # makes a provider chosen through the plugin work in LMS too. Neither is
 # privileged; the last one written is the one both sides read.
+#
+# Naming an **empty** one is the third case: it disables the queue, clearing the
+# provider from both places and emptying the buffer along with it. A `token:` the
+# caller did not send at all is not that -- see the branch below.
 sub cliConfig {
 	my $request = shift;
 
@@ -197,24 +201,57 @@ sub cliConfig {
 
 	$rec->{max} = $max if defined $max;
 
-	if ( defined $token && length $token ) {
+	if ( defined $token ) {
 
 		my $vClient = Plugins::RemotePlayerCompanion::DSTM::VClient->new(
 			$playerid, Plugins::RemotePlayerCompanion::DSTM::Queue->playlist($rec) );
 
-		# Checked before either is written, so a refused provider leaves both
-		# the queue and the player as they were.
-		my ( $ok, $err ) = Plugins::RemotePlayerCompanion::DSTM::Provider->check( $vClient, $token );
+		if ( length $token ) {
 
-		return _fail( $request, $err, _providerMessage( $err, $playerid ) ) unless $ok;
+			# Checked before either is written, so a refused provider leaves both
+			# the queue and the player as they were.
+			my ( $ok, $err ) = Plugins::RemotePlayerCompanion::DSTM::Provider->check( $vClient, $token );
 
-		# The player first, then the record: if the second write fails the
-		# player is merely set to what was asked for, which is harmless, while
-		# the other order could leave a queue drawing from a provider the
-		# player is not set to.
-		Plugins::RemotePlayerCompanion::DSTM::Provider->assign( $vClient, $token );
+			return _fail( $request, $err, _providerMessage( $err, $playerid ) ) unless $ok;
 
-		$rec->{provider} = $token;
+			# The player first, then the record: if the second write fails the
+			# player is merely set to what was asked for, which is harmless, while
+			# the other order could leave a queue drawing from a provider the
+			# player is not set to.
+			Plugins::RemotePlayerCompanion::DSTM::Provider->assign( $vClient, $token );
+
+			$rec->{provider} = $token;
+		}
+		else {
+
+			# An empty token is the caller saying there should be **no** provider,
+			# which is not the same as saying nothing: a `config` without a
+			# `token:` at all -- `max:` on its own -- leaves the queue's provider
+			# alone, and that is what makes this worth distinguishing.
+			#
+			# It has to reach the player's own setting too, and as '0' rather than
+			# by removing the key: '0' is what Dont Stop The Music's own settings
+			# write for "none". Left standing, the provider would be adopted
+			# straight back, because a queue with no provider establishes one from
+			# the player the next time anything asks it for tracks -- which is the
+			# whole point of _establish, and would undo this.
+			#
+			# The fill goes first, or its callbacks would write tracks into the
+			# buffer that is about to be emptied. The material goes with the
+			# buffer, there being nothing for a queue with no provider to derive
+			# from.
+			Plugins::RemotePlayerCompanion::DSTM::Refill->abandon($playerid);
+
+			Plugins::RemotePlayerCompanion::DSTM::Provider->assign( $vClient, '0' );
+
+			$rec->{provider} = undef;
+
+			Plugins::RemotePlayerCompanion::DSTM::Queue->clear($rec);
+			$rec->{seed} = [];
+
+			main::DEBUGLOG && $log->is_debug
+				&& $log->debug("config $playerid: provider cleared; the queue is disabled");
+		}
 	}
 
 	Plugins::RemotePlayerCompanion::DSTM::Queue->save($rec);
