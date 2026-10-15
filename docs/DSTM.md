@@ -4,10 +4,9 @@ Detail for the `dstm` family of [Remote Player Companion](../README.md): what th
 queue is, how it is kept full, and then the commands, what they take, what they
 answer with, and what they fail with.
 
-It is written for whoever works on this next, so the mechanics come first. Most of
-the commands only make sense once the fill is understood, and several of the
-design decisions are only explicable in terms of it. The command reference follows,
-and the advice about which provider to give a queue is at the end.
+It is written for whoever works on this next, so the mechanics come first and the
+command reference follows; the advice about which provider to give a queue is at
+the end.
 
 ## What it is
 
@@ -51,11 +50,9 @@ A queue holds two separate lists, and what separates them matters:
   serves it, `take` never touches it, and `total` does not count it.
 
 The provider is given **both**, as one playlist, through the synthetic client it is
-handed: that is what `Queue::playlist` is, and it is why RandomPlay's genre tokens
-and LastMix's similarity search both see the queue's contents and its subject. A
-client's `playlist` is also how a real provider asks a real player what it is
-playing, so a queue given to a provider as a client looks like a player with a
-playlist.
+handed — that is what `Queue::playlist` is. A client's playlist is how a provider
+asks what is playing, so a queue handed over this way looks like a player, and
+RandomPlay's genre tokens take their genres from what this queue has been holding.
 
 Keeping them apart is what makes a named seed possible. `seed url:<track>` says
 what the queue is *about* — the track the player is already listening to — and that
@@ -82,16 +79,12 @@ library, so both work on an empty queue.
 ### Establishing a queue
 
 **Establishing** a queue is two things: giving it a provider, and giving it
-something to work from. Every other command assumes a queue that has been through
-it.
+something to work from. Everything else here assumes a queue that has.
 
-**Where the provider comes from.** Whichever way it arrives — named in
-`config token:`, or adopted by `seed` from the player's own Dont Stop The Music
-setting — it ends up in the same two places: the queue's record, and that player's
-`plugin.dontstopthemusic:provider` setting. Both are sources, neither is
-privileged, and the last one written is the one both sides read. So the player goes
-on behaving the way its queue does, and a queue can be configured without going
-into LMS's UI.
+**Where the provider comes from.** Named in `config token:`, or adopted by `seed`
+from the player's own Dont Stop The Music setting — and either way it ends up in
+both: the queue's record, and that player's setting. The `config` section below has
+what it means to write the second one.
 
 Three consequences follow, and all three surprise people:
 
@@ -105,9 +98,6 @@ Three consequences follow, and all three surprise people:
   fault.
 - **The whitelist is narrow, on both routes.** See below.
 
-Each player's provider is independent of every other's, by construction: the record
-is keyed by playerid, and the setting is keyed by client id.
-
 **Why the whitelist is narrow.** DSTM's registry carries one entry per favourite
 alongside the real providers — radio stations and albums alike, under the
 favourite's own title. A queue pointed at one of those is pointed at a single
@@ -119,16 +109,6 @@ provider that needs a seed to supply that seed is the problem, not the solution,
 `seed` reaches for RandomPlay's own picks rather than asking the queue's provider
 for something to work from. It is a starting point, not a curated one, and the
 queue's real provider takes over from the very next fill.
-
-**Who establishes.** `seed` always does. `nextbatch` does too, when it finds
-nothing to serve from — no queue, or a queue with no provider — or nothing to serve
-*with*, which is a queue that has a provider but nothing at all for it to derive
-from. That last case is what `config token:` leaves behind on purpose: a queue
-being configured for a new provider has no material yet.
-
-**Establishing is not rewriting.** Everything that can refuse is asked before
-anything is written, so a refused `seed` leaves the queue exactly as it was,
-provider included. Refusing is never a way to unconfigure a running queue.
 
 ### One fill
 
@@ -217,14 +197,6 @@ somebody asks for them.
 That is also why `nextbatch` normally answers at once however slow the provider
 is. There is no waiting to be done while there is anything to hand over.
 
-**The provider sees the seed and the buffer together.** We hand a provider the
-queue as its client, and a client's playlist is how a provider asks what is
-playing — so RandomPlay's `*_WITH_GENRES` tokens take their genres from what this
-queue has been holding, and its batches stay in the same vein. That is the second
-reason the seed is kept even after the buffer has drained: an empty playlist
-leaves a deriving provider with nothing, which is set out in
-[The two lists a queue keeps](#the-two-lists-a-queue-keeps).
-
 ### Where a queue's record is kept
 
 Queue records live in `Slim::Utils::Cache`, under a namespace of our own rather
@@ -252,6 +224,7 @@ Two details of that API are worth knowing, because both are silent when got wron
 `$class` slot, so it must be called as a plain function — called with `->`, the
 package name takes the client's place. `getHandler` does have a `$class` slot and
 *is* called with `->`.
+
 ## Commands
 
 Every command here takes `playerid`, which names the queue: the remote player is
@@ -337,9 +310,7 @@ Both modes start over, and they differ only in what replaces what:
   "I am playing this now" is a statement about the present, so the previous
   material is replaced rather than added to.
 - A seed that **names nothing** fills the buffer to half the queue's depth, from
-  the plugin's own selection. That is 25 tracks at the default depth of 50, and it
-  is not meant to line up with `nextbatch`'s default of 10: the two answer
-  different questions.
+  the plugin's own selection.
 
 ### `sources` — the providers `config` can be given
 
@@ -434,7 +405,8 @@ Fails with `BAD_MAX`, `UNKNOWN_PROVIDER`, `PROVIDER_NOT_OFFERED` or
 | `id` | — | The same, by track id. Give one or the other, not both |
 
 There is **no `count`**: a seed fills to half the queue's depth and no size of its
-own. A caller that passes one has it **ignored**, not refused, because parameters
+own — 25 tracks at the default depth of 50, which is not meant to line up with
+`nextbatch`'s default of 10. The two answer different questions. A caller that passes one has it **ignored**, not refused, because parameters
 this plugin does not read are simply not read. That is worth knowing when updating
 a caller.
 
@@ -583,19 +555,19 @@ queue for this player will adopt its provider from.
 
 ### What each entry carries
 
-`nextbatch` and `queue` build their entries through LMS's own tag machinery
-(`Slim/Control/Queries.pm`), so `tags:` takes **LMS's own letters** and means here
-exactly what it means to `songinfo`. That is deliberate: a second, hand-kept
-mapping would be a second thing to keep in step with LMS, and a field LMS adds to
-its map would quietly go missing here.
+`nextbatch` and `queue` return their entries through LMS's own tag machinery, so
+`tags:` takes **LMS's own letters** and means here exactly what it means there.
+LMS's `tracks` command takes the same parameter, and its documentation is the list
+of letters to refer to; an unrecognised one is skipped rather than being an error.
+
+There is no mapping of our own, deliberately: a second one would be a second thing
+to keep in step with LMS, and a field LMS adds to its own would go missing here.
 
 With no `tags:`, an entry carries `url`, `id`, `title`, `artist`, `album`, `year`,
 `duration`, `tracknum` and `coverid` — the set these commands returned before there
-was a `tags` parameter, plus `coverid`. The letters behind that default are
-`ydtalc`: `y` year, `d` duration, **`t` track number — which is not the title,
-however easy that is to misread** — `a` artist, `l` album, `c` coverid. `id` and
-`title` come back whatever the tags say, and so does `url`, which is set from the
-buffer rather than fetched from the database.
+was a `tags` parameter, plus `coverid`. `id` and `title` come back whatever the
+tags say, and so does `url`, which is set from the buffer rather than fetched from
+the database.
 
 **The types are LMS's own, and they are not uniform.** Measured on a real answer:
 `id` is a number, `duration` is **seconds as a floating-point number** (`679.523`,
@@ -609,15 +581,12 @@ that the player has to be able to fetch. A track whose fields LMS cannot resolve
 an entry the database does not hold — comes back with its `url` alone rather than
 taking the whole answer down.
 
-`tags:g` adds `genre`; `A` adds the contributor roles by name (`artist`,
-`composer`, `conductor` …), `b` the work, `z` the subtitle and `i` the disc. An
-unrecognised letter is skipped rather than being an error.
-
 **Artwork is a `coverid`, not a URL.** LMS builds an artwork URL that points at the
 LMS itself, and a cached player is offline by the time it plays — the URL would be
 dead on arrival. So the id is handed over and fetching the image is left to the
 player, which can do it while it still has a connection. Anything that needs a URL
 can build one from the id and the server it already knows.
+
 ## Errors
 
 | Code | Meaning |
@@ -647,6 +616,11 @@ own, and `last_error` is what says why.
 establishing a queue, so from `seed` and `nextbatch` alike; `BAD_MAX` is `config`'s;
 `SEED_NOT_IN_LIBRARY` is `seed`'s, and `NO_SEED_AVAILABLE` is either of them when
 the plugin can find nothing to seed with.
+
+**A refusal changes nothing.** Everything that could refuse is checked before
+anything is written, so a command that is turned away leaves the queue exactly as it
+was — its provider included. Refusing is never a way to undo a queue that is already
+working.
 
 ## A note on `sources`
 
