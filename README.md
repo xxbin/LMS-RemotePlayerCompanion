@@ -71,13 +71,12 @@ player never waits on a slow or asynchronous music-discovery provider.
 ["", ["remoteplayercompanion", "dstm", "queue",     "playerid:02:00:79:b3:5d:7c"]]
 ```
 
-`seed` is what establishes a queue: it adopts the provider from the player's
-own Dont Stop The Music setting — which is why the `playerid` has to be one LMS
-knows — and, given a `url:` or `id:`, builds the queue around that one track
-without ever handing it to the player. `config` sets the depth and may name a
-provider instead; both are optional, since `seed` alone is enough to make a
-queue. So is a `nextbatch` that finds none: it establishes the same queue for
-itself, though it cannot name a track to build around the way `seed` can.
+`config` is what gives a queue its provider — the queue's own, kept in its
+record and nowhere else — and `seed` then gives it something to work from, so
+those two are the order to use. Given a `url:` or `id:`, a seed builds the queue
+around that one track without ever handing it to the player. A `nextbatch` that
+finds a queue with nothing in it gives it material the same way, though it cannot
+name a track to build around as `seed` can.
 
 Every command in the family is registered with `needsClient = 0`, and carries
 the queue in the `playerid` parameter with `params[0]` left empty.

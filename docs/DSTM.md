@@ -81,22 +81,19 @@ library, so both work on an empty queue.
 **Establishing** a queue is two things: giving it a provider, and giving it
 something to work from. Everything else here assumes a queue that has.
 
-**Where the provider comes from.** Named in `config token:`, or adopted by `seed`
-from the player's own Dont Stop The Music setting — and either way it ends up in
-both: the queue's record, and that player's setting. The `config` section below has
-what it means to write the second one.
+**Where the provider comes from.** `config token:`, and nowhere else: a queue's
+provider is the queue's own. Dont Stop The Music's per-player setting — the one
+LMS's own pages read and write — is neither consulted nor written, and
+[How a token becomes a handler](#how-a-token-becomes-a-handler) is where it is
+explained why resolving a token does not need it.
 
-Three consequences follow, and all three surprise people:
+**The provider changes when something changes it, and nothing else does.** No
+setting anywhere is read to find out what a queue should draw from; a queue draws
+from what `config token:` gave it until another `config token:` replaces it. So
+changing the player's own Dont Stop The Music setting in LMS does nothing to a
+queue, which is expected rather than a fault.
 
-- **The queue's `playerid` must be an id LMS knows.** The preference is keyed by
-  client id, so a queue named for something LMS has never heard of has no setting
-  to read and no provider to adopt.
-- **It is a snapshot.** Changing the player's provider in LMS does not change a
-  running queue; the new one is taken the next time `seed` or `config` runs. That is
-  deliberate — the queue reports one provider and draws from that same one — but it
-  does mean "I changed the setting and nothing happened" is expected rather than a
-  fault.
-- **The whitelist is narrow, on both routes.** See below.
+**The whitelist is narrow.** See below.
 
 **Why the whitelist is narrow.** DSTM's registry carries one entry per favourite
 alongside the real providers — radio stations and albums alike, under the
@@ -215,7 +212,9 @@ lexical to DSTM.
 
 Resolving *our* token therefore means putting it where `getHandler` will read it.
 We write it into the preference of a throwaway object, call `getHandler`, and put
-the preference back immediately. `getHandler` is the only reader, so the swap never
+the preference back immediately. **That is why this plugin needs no setting of the
+player's to work from**: it supplies the token itself, for the length of the call,
+and the queue's record is where a token is kept. `getHandler` is the only reader, so the swap never
 has to stay open across a possibly asynchronous provider call; the cost is one
 small leftover key per configured remote player in that preferences file.
 
@@ -228,8 +227,7 @@ package name takes the client's place. `getHandler` does have a `$class` slot an
 ## Commands
 
 Every command here takes `playerid`, which names the queue: the remote player is
-not an LMS client, so there is nothing else to identify it by. It has to be an id
-LMS knows — [Establishing a queue](#establishing-a-queue) says why. Every other
+not an LMS client, so there is nothing else to identify it by. Every other
 parameter is optional, and the commands are set out below in the order a caller
 meets them.
 
@@ -242,19 +240,18 @@ they are the first three below.
 | | Step | |
 |---|---|---|
 | 0 | `sources playerid:<id>` | optional — which providers `config` can be given |
-| 1 | `config playerid:<id> [token:<T>] [max:<N>]` | optional — `token:` names a provider, and **overwrites the one the player has in LMS**; without it the queue uses that setting as it stands. `max` is the queue's depth, 50 unless said |
-| 2 | `seed playerid:<id> [url:<u> \| id:<n>]` | **required once**, unless `config token:` named a provider or `nextbatch` is left to establish the queue itself — adopts the provider the player is set to, and creates the queue |
+| 1 | `config playerid:<id> [token:<T>] [max:<N>]` | **required once** — `token:` names the provider the queue draws from, and creates the queue; without it the queue keeps whatever provider it has. `max` is the queue's depth, 50 unless said |
+| 2 | `seed playerid:<id> [url:<u> \| id:<n>]` | **required once**, unless `nextbatch` is left to give the queue material — keeps the provider the queue has, and gives it something to work from |
 | 3 | `nextbatch playerid:<id> [count:<N>] [tags:<letters>]` | the loop — call it whenever the player wants more |
 | 4 | `queue`, `status` | optional, any time — both read-only |
 | 5 | `clear`, `forget playerid:<id>` | optional — `clear` empties the tracks, `forget` drops the queue's record |
 
-A queue draws from the provider **the player** is set to, which is why `seed`
-takes no token: it adopts that setting.
+A queue draws from the provider it was given, which is why `seed` takes no token:
+it has nothing to add to that.
 
 **Config, then seed, then nextbatch** is the order this is meant to be used in.
-`config` says which provider the queue should draw from — and, since it writes the
-player's own setting too, which one the player should; `seed` adopts that and gives
-the queue something to work from; `nextbatch` is the loop from then on.
+`config` says which provider the queue draws from and creates it; `seed` gives it
+something to work from; `nextbatch` is the loop from then on.
 
 Seeding is worth doing deliberately rather than leaving it to `nextbatch`, even
 though nothing below insists on it. A seed can name the track the queue is to be
@@ -273,11 +270,11 @@ provider in LMS:
 establishment `seed` performs, minus the track a named seed would supply. It does
 the same for a queue that has a provider but nothing for it to work from, and in
 that case it keeps the provider the queue already has: a batch request is no place
-to re-point somebody's queue, where `seed` is the command that deliberately
-re-adopts the player's setting.
+to re-point somebody's queue, where `seed` is the command that deliberately starts
+the queue over.
 
-**A player set to no provider is the one thing that cannot be worked around.**
-`seed` and `nextbatch` both answer `NO_PROVIDER`, and say where to set one.
+**A queue with no provider is the one thing that cannot be worked around.** `seed`
+and `nextbatch` both answer `NO_PROVIDER`, and say to configure one.
 
 #### After that it is a loop
 
@@ -290,19 +287,18 @@ return at all.
 `config` does not have to be called again either. Its depth persists in the queue
 record, across restarts.
 
-#### Seed again when the player's provider changes
+#### Seed again to start a queue over
 
-The provider is a **snapshot**: a queue goes on drawing from the one it adopted
-until something adopts another. Changing the provider in LMS does not reach a
-running queue. `seed` again — with or without a track — is what picks up a change,
-and it also refreshes the queue's derivation material.
+A queue draws from the provider `config token:` gave it, and nothing else reaches
+in: not a setting in LMS, and not `seed`. Another `config token:` is the only thing
+that changes it. So seeding again is about the queue's material rather than about
+its provider.
 
 **A seed starts the queue over.** It drops the tracks, and the material a previous
-seed established along with it, because a queue that kept either would go on
-deriving from a provider — or a track — the caller has moved on from. So seeding a
-queue that is playing throws away whatever it was holding, and seeding twice in a
-row does the work twice. That is the price of the only way to pick up a provider
-change.
+seed established along with it, because a queue that kept them would go on deriving
+from a track the caller has moved on from. So seeding a queue that is playing
+throws away whatever it was holding, and seeding twice in a row does the work
+twice.
 
 Both modes start over, and they differ only in what replaces what:
 
@@ -352,7 +348,7 @@ Fails with `DSTM_DISABLED` when Dont Stop The Music is not enabled.
 
 | Parameter | Default | |
 |---|---|---|
-| `token` | — | A provider to point the queue at, empty to disable the queue, or omitted to leave the player's own configuration alone |
+| `token` | — | A provider to point the queue at, empty to disable the queue, or omitted to leave the queue's provider alone |
 | `max` | 50 | How deep the queue is, 1–100. Persisted, so it survives a restart |
 
 ```json
@@ -363,30 +359,25 @@ Fails with `DSTM_DISABLED` when Dont Stop The Music is not enabled.
 the first time it is `0`, because `config` starts no fill: that is not a failure,
 and it is not a reason to read the queue again on the next line.
 
-**`token:` is about the system's Dont Stop The Music configuration, not only about
-this queue.** Naming a provider writes it to two places: the queue's record, and
-the player's own `plugin.dontstopthemusic:provider` setting — the same setting
-LMS's Dont Stop The Music pages read and write. So it does not merely point one
-queue somewhere: it **overwrites the provider that player is configured with**, and
-LMS's own screens will show the new one afterwards. Configuring a queue for a
-player changes that player.
+**`token:` is the only thing that gives a queue a provider, and it stays on the
+queue.** It goes into the record and nowhere else. Dont Stop The Music's own
+per-player setting belongs to that plugin and to the player: this one neither reads
+it nor writes it, and resolving a token needs it no more than configuring a queue
+does — see [How a token becomes a
+handler](#how-a-token-becomes-a-handler).
 
-Leaving `token:` out is what leaves that configuration alone, and it is why the
-parameter is described as optional: a queue with no provider of its own adopts the
-player's, so what it uses is the system's configuration as it stands. That is also
-why `seed` takes no token of its own.
+Leaving `token:` out leaves whatever provider the queue has alone, which is what
+makes the parameter optional: `config max:` on its own just sets the depth.
 
 **An empty `token:` disables the queue.** Sending no provider is not the same as
 sending none: `config max:` on its own leaves the queue's provider alone, where
-`config token:` clears it. Disabling clears the provider from **both** places — the
-record and the player's own setting — and empties the tracks along with the seed.
-The player's setting has to go too, and that is not tidiness: a queue with no
-provider establishes one from the player the next time anything asks it for tracks,
-so a disable that stopped at the record would be undone by the next `nextbatch`.
+`config token:` clears it. Disabling clears the provider from the queue, and empties
+the tracks along with the seed. Nothing adopts a provider from anywhere, so nothing
+undoes it: the next `nextbatch` finds a queue with no provider and says so.
 
-`status` is how the two states are told apart afterwards: a disabled queue reports
-`configured: 1` with an empty `provider` and `total: 0`, where a queue that was
-never established reports `configured: 0`.
+`status` is how the two states are told apart afterwards: a disabled queue is one
+with a record — `configured: 1` — an empty `provider` and `total: 0`, where a queue
+that was never configured reports `configured: 0`.
 
 Fails with `BAD_MAX`, `UNKNOWN_PROVIDER`, `PROVIDER_NOT_OFFERED` or
 `DSTM_DISABLED`.
@@ -549,9 +540,9 @@ cleared queue may hand out tracks it has served before.
 
 `forgotten` says whether there was a record to drop, and asking twice is not an
 error. This is the only way back to the state a player that has never used the
-plugin is in, and the player's own Dont Stop The Music setting is left alone: that
-setting belongs to the player rather than to this queue, and it is where the next
-queue for this player will adopt its provider from.
+plugin is in. The player's own Dont Stop The Music setting is left alone, as it
+always is: that setting belongs to the player rather than to this queue, and this
+command has no business with either.
 
 ### What each entry carries
 
@@ -593,9 +584,9 @@ can build one from the id and the server it already knows.
 |---|---|
 | `MISSING_PARAMETER` / `BAD_PARAMETER` | `playerid` absent or malformed, or `seed` given both `url:` and `id:` |
 | `NOT_CONFIGURED` | The queue disappeared while the request was being served — reachable only when `forget` races a `nextbatch`. Nothing leaves a caller without a queue otherwise: `seed` and `nextbatch` both establish one |
-| `NO_PROVIDER` | No Dont Stop The Music provider is set for the player, so there was nothing for `seed` — or for a `nextbatch` establishing a queue for itself — to adopt |
-| `UNKNOWN_PROVIDER` | A token DSTM does not know — named in `config`, or found in the player's setting |
-| `PROVIDER_NOT_OFFERED` | A token DSTM knows but `sources` would not offer, from either route |
+| `NO_PROVIDER` | The queue has no provider, and nothing here invents one: `config token:` is what gives it one |
+| `UNKNOWN_PROVIDER` | A token DSTM does not know, named in `config` |
+| `PROVIDER_NOT_OFFERED` | A token DSTM knows but `sources` would not offer |
 | `SEED_NOT_IN_LIBRARY` | A named seed that is not a track in this library |
 | `BAD_MAX` | `max` outside 1–100 |
 | `NO_SEED_AVAILABLE` | Seeding could select no tracks at all — RandomPlay unavailable, or an empty library |
