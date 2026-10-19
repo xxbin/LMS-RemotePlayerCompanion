@@ -12,6 +12,7 @@ use warnings;
 
 use Slim::Utils::Log;
 
+use Plugins::RemotePlayerCompanion::History::Stats;
 use Plugins::RemotePlayerCompanion::History::Store;
 
 my $log = logger('plugin.remoteplayercompanion');
@@ -40,6 +41,27 @@ sub run {
 	}
 
 	my $accepted = scalar @new;
+
+	# Local writes first: they are the durable record and cannot fail
+	# asynchronously. Any destination throwing is caught per entry, so one
+	# broken one does not stop the others or leave the request unanswered.
+	for my $entry ( @new ) {
+		my $result = eval {
+			Plugins::RemotePlayerCompanion::History::Stats->apply($entry);
+		};
+		$result ||= { status => 'error', error => ( $@ || 'unknown error' ) };
+
+		main::DEBUGLOG && $log->is_debug && $log->debug(
+			'history lms: ' . $playerid . ' ' . $entry->{url}
+			. ' status=' . $result->{status}
+			. (
+				$result->{status} eq 'ok'
+				? ' playcount=' . ( 0 + $result->{playcount} )
+					. ' lastplayed=' . ( 0 + $result->{lastplayed} )
+				: ' error=' . ( $result->{error} || '' )
+			)
+		);
+	}
 
 	my $nowplaying_status = $args->{nowplaying} ? 'unavailable' : 'skipped';
 
