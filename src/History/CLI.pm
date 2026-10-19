@@ -135,6 +135,13 @@ sub cliReport {
 		return _fail( $request, 'INTERNAL_ERROR', $error );
 	}
 
+	# Report decides the one refusal that depends on server state (the
+	# scrobbler queue's depth) and returns it rather than dying.
+	if ( $receipt->{error} ) {
+		return _fail( $request, $receipt->{error}{code},
+			$receipt->{error}{message} );
+	}
+
 	$request->addResult( 'playerid', $playerid );
 	$request->addResult( 'accepted', $receipt->{accepted} );
 	$request->addResult( 'duplicates', $receipt->{duplicates} );

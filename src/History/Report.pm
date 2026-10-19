@@ -13,6 +13,7 @@ use warnings;
 use Slim::Utils::Log;
 
 use Plugins::RemotePlayerCompanion::History::APC;
+use Plugins::RemotePlayerCompanion::History::Scrobbler;
 use Plugins::RemotePlayerCompanion::History::Stats;
 use Plugins::RemotePlayerCompanion::History::Store;
 
@@ -42,6 +43,39 @@ sub run {
 	}
 
 	my $accepted = scalar @new;
+
+	# Everything AudioScrobbler would refuse is decided here, before the first
+	# write: the queue cap is the one refusal that depends on what the next
+	# few lines do, and a successful answer tells the caller to delete its
+	# copy.
+	my $scrobbler = Plugins::RemotePlayerCompanion::History::Scrobbler->new($playerid);
+
+	my @scrobble;
+	for my $entry ( @new ) {
+		my ( $ok, $reason, $item ) = $scrobbler->eligible($entry);
+
+		$log->debug(
+			'history scrobbler: ' . $playerid . ' ' . $entry->{url}
+			. ' status=' . ( $ok ? 'queued' : $reason ) )
+			if main::DEBUGLOG && $log->is_debug;
+
+		push @scrobble, $item if $ok;
+	}
+
+	if ( @scrobble && $scrobbler->would_overflow( scalar @scrobble ) ) {
+		return {
+			error => {
+				code    => 'SCROBBLE_QUEUE_FULL',
+				message => 'the AudioScrobbler queue already holds '
+					. $scrobbler->pending . ' entries',
+			},
+		};
+	}
+
+	my $nowplaying_ok = 0;
+	if ( $args->{nowplaying} ) {
+		( $nowplaying_ok ) = $scrobbler->eligible( $args->{nowplaying} );
+	}
 
 	# Local writes first: they are the durable record and cannot fail
 	# asynchronously. Any destination throwing is caught per entry, so one
@@ -92,7 +126,16 @@ sub run {
 		}
 	}
 
-	my $nowplaying_status = $args->{nowplaying} ? 'unavailable' : 'skipped';
+	# Scrobbles, then the present tense: LMS's own newsongCallback does the
+	# same, so a queued scrobble cannot clobber the now-playing display.
+	my $queued = $scrobbler->enqueue( \@scrobble );
+
+	my $nowplaying_status = 'skipped';
+	if ( $args->{nowplaying} ) {
+		$nowplaying_status = $nowplaying_ok
+			? $scrobbler->nowPlaying( $args->{nowplaying}{track} )
+			: 'unavailable';
+	}
 
 	# Marked after the last write, not before: a server that dies mid-entry
 	# should re-apply it on retry rather than forget it. The window is a few
@@ -108,13 +151,14 @@ sub run {
 		. ' entries=' . scalar @{$entries}
 		. ' accepted=' . ( 0 + $accepted )
 		. ' duplicates=' . ( 0 + $duplicates )
+		. ' queued=' . ( 0 + $queued )
 		. ' nowplaying=' . $nowplaying_status
 	);
 
 	return {
 		accepted          => 0 + $accepted,
 		duplicates        => 0 + $duplicates,
-		queued            => 0,
+		queued            => 0 + $queued,
 		nowplaying_status => $nowplaying_status,
 	};
 }
