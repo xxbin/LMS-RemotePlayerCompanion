@@ -93,6 +93,15 @@ class LMS:
         return self.call(["remoteplayercompanion", "dstm", action,
                           f"playerid:{playerid}", *params], timeout=timeout)
 
+    def history(self, playerid, *params, timeout=90):
+        """Report a batch of plays for a remote player.
+
+        The player id is a parameter, like DSTM's: the remote player is not
+        an LMS client, so there is nothing to resolve it against.
+        """
+        return self.call(["remoteplayercompanion", "history", "report",
+                          f"playerid:{playerid}", *params], timeout=timeout)
+
     def status(self, playerid):
         return self.dstm("status", playerid)
 
@@ -182,6 +191,20 @@ def first_library_track(lms, limit=1):
     for t in (r.get("titles_loop") or []):
         if t.get("url"):
             return t["url"]
+    return None
+
+
+def library_track_with_stats(lms, limit=500):
+    """A library track that carries a tracks_persistent row, or None.
+
+    Not every library track has one -- a cue-split track may have no row at
+    all -- and a request against such a track is a legitimate `no_record`,
+    not a test of the play count. The count arrives as a string.
+    """
+    r = lms.call(["tracks", 0, limit, "tags:uO"])
+    for t in (r.get("titles_loop") or []):
+        if t.get("url") and "playcount" in t:
+            return t
     return None
 
 

@@ -15,6 +15,7 @@ use Slim::Utils::Log;
 use Slim::Utils::PluginManager;
 
 use Plugins::RemotePlayerCompanion::DSTM::CLI;
+use Plugins::RemotePlayerCompanion::History::CLI;
 
 # Logging, registered rather than merely created.
 #
@@ -46,6 +47,7 @@ sub initPlugin {
 	my $class = shift;
 
 	Plugins::RemotePlayerCompanion::DSTM::CLI->init;
+	Plugins::RemotePlayerCompanion::History::CLI->init;
 
 	Slim::Control::Request::addDispatch(
 		[ 'remoteplayercompanion', 'version' ],
