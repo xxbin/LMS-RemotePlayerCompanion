@@ -59,8 +59,8 @@ what the queue is *about* — the track the player is already listening to — a
 track must never come back in a batch, so it is kept out of the list that
 `nextbatch` serves.
 
-**The seed follows the queue.** Every batch that hands tracks over leaves the last
-of them as what the queue is about, so a queue that has served anything always has
+**The seed follows the queue.** Every batch that hands tracks over leaves them
+all as what the queue is about, so a queue that has served anything always has
 something for a provider to derive from, even once the queue has drained. A batch
 that hands over nothing leaves the seed as it was, there being nothing newer to
 make it from.
@@ -302,7 +302,7 @@ twice.
 
 Both modes start over, and they differ only in what replaces what:
 
-- A seed that **names a track** sets the derivation material to that one track.
+- A seed that **names tracks** sets the derivation material to those tracks.
   "I am playing this now" is a statement about the present, so the previous
   material is replaced rather than added to.
 - A seed that **names nothing** fills the queue to half its depth, from
@@ -388,11 +388,13 @@ Fails with `BAD_MAX`, `UNKNOWN_PROVIDER`, `PROVIDER_NOT_OFFERED` or
 ["", ["remoteplayercompanion", "dstm", "seed", "playerid:02:00:79:b3:5d:7c"]]
 ["", ["remoteplayercompanion", "dstm", "seed", "playerid:02:00:79:b3:5d:7c",
                                               "url:file:///music/what-im-playing.flac"]]
+["", ["remoteplayercompanion", "dstm", "seed", "playerid:02:00:79:b3:5d:7c",
+                    "url:file:///music/a.flac,file:///music/b.flac"]]
 ```
 
 | Parameter | Default | |
 |---|---|---|
-| `url` | — | A library track to build the queue around. Never handed to the player |
+| `url` | — | A comma-separated list of library tracks to build the queue around. Never handed to the player |
 | `id` | — | The same, by track id. Give one or the other, not both |
 
 There is **no `count`**: a seed fills to half the queue's depth and no size of its
@@ -403,14 +405,20 @@ a caller.
 
 ```json
 { "playerid": "…", "max": 50, "provider": "PLUGIN_RANDOM_TRACK",
-  "added": 25, "total": 25, "seeded_track": "" }
+  "added": 25, "total": 25,
+  "seeded_tracks": [ "file:///music/a.flac", "file:///music/b.flac" ] }
 ```
 
 The queue as it now stands, plus what the seeding did: `added` is how many tracks
-went in, `total` is what the queue holds afterwards. `seeded_track` is the track the queue is
-now built around, if one was named — reported so that a caller can tell a seed that
-was taken from one that was ignored, because a seed that never lands otherwise
-looks exactly like a queue that has not filled yet.
+went in, `total` is what the queue holds afterwards. `seeded_tracks` is the list
+the queue is now built around, and is empty when no tracks were named — reported so
+that a caller can tell a seed that was taken from one that was ignored, because a
+seed that never lands otherwise looks exactly like a queue that has not filled yet.
+
+It is an **array of URLs rather than the family's `*_loop`**, which carries objects
+and has no shape for plain strings. Every track in it has to be in the library: one
+that is not refuses the whole seed with `SEED_NOT_IN_LIBRARY`, naming that track,
+and changes nothing.
 
 [The order to call them in](#the-order-to-call-them-in) has what a seed does to a
 queue that is already running, and what the two modes replace.
@@ -587,7 +595,7 @@ can build one from the id and the server it already knows.
 | `NO_PROVIDER` | The queue has no provider, and nothing here invents one: `config token:` is what gives it one |
 | `UNKNOWN_PROVIDER` | A token DSTM does not know, named in `config` |
 | `PROVIDER_NOT_OFFERED` | A token DSTM knows but `sources` would not offer |
-| `SEED_NOT_IN_LIBRARY` | A named seed that is not a track in this library |
+| `SEED_NOT_IN_LIBRARY` | One of a named seed's tracks is not in this library |
 | `BAD_MAX` | `max` outside 1–100 |
 | `NO_SEED_AVAILABLE` | Seeding could select no tracks at all — RandomPlay unavailable, or an empty library |
 | `DSTM_DISABLED` | Don't Stop The Music is not enabled |

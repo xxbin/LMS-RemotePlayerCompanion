@@ -523,7 +523,7 @@ sub _establish {
 	main::DEBUGLOG && $log->is_debug
 		&& $log->debug("$what $playerid: provider $token");
 
-	my ( $url, $urlErr, $urlMessage ) = _trackUrl($request);
+	my ( $urls, $urlErr, $urlMessage ) = _trackUrl($request);
 
 	if ($urlErr) {
 		main::DEBUGLOG && $log->is_debug
@@ -546,14 +546,14 @@ sub _establish {
 	# written, so that failing to find any leaves the queue exactly as it was.
 	# That includes there being no queue to leave: creating one is a write, and
 	# it must not happen while something else can still refuse.
-	my $urls = [];
+	my $picked = [];
 
-	unless ( defined $url ) {
-		$urls = eval {
+	unless ( @{$urls} ) {
+		$picked = eval {
 			Plugins::RemotePlayerCompanion::DSTM::RandomPlay->expand( 'randomplay://track', $target );
 		} || [];
 
-		unless ( scalar @{$urls} ) {
+		unless ( scalar @{$picked} ) {
 			main::DEBUGLOG && $log->is_debug
 				&& $log->debug("$what $playerid: nothing could be selected to seed with (NO_SEED_AVAILABLE)");
 
@@ -577,11 +577,11 @@ sub _establish {
 	# A named seed is what the queue is *about*, so it replaces the previous
 	# one rather than adding to it: "I am playing this now" is a statement
 	# about the present.
-	if ( defined $url ) {
-		Plugins::RemotePlayerCompanion::DSTM::Queue->setSeed( $rec, $url );
+	if ( @{$urls} ) {
+		Plugins::RemotePlayerCompanion::DSTM::Queue->setSeed( $rec, @{$urls} );
 	}
 	else {
-		$added = Plugins::RemotePlayerCompanion::DSTM::Queue->add( $rec, $urls, $target );
+		$added = Plugins::RemotePlayerCompanion::DSTM::Queue->add( $rec, $picked, $target );
 	}
 
 	Plugins::RemotePlayerCompanion::DSTM::Queue->save($rec);
@@ -590,8 +590,8 @@ sub _establish {
 	# get there, and what the queue holds now.
 	main::DEBUGLOG && $log->is_debug && $log->debug(
 		"$what $playerid: "
-			. ( defined $url
-				? "built around $url"
+			. ( @{$urls}
+				? 'built around ' . scalar( @{$urls} ) . ' tracks'
 				: "filled " . ( 0 + $added ) . " of $target from the plugin's own selection" )
 			. ", dropped $dropped"
 			. ', tracks=' . Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec)
@@ -626,11 +626,16 @@ sub cliSeed {
 		Plugins::RemotePlayerCompanion::DSTM::Queue->total($rec) );
 }
 
-# The track a named seed refers to: ( $url, $error, $message ).
+# The tracks a named seed refers to: ( \@urls, $error, $message ).
 #
-# No url and no id is not an error -- it is the request to fill a queue, which
-# is what seed did before it could name a track, so all three come back empty
-# and the caller carries on.
+# No url and no id is not an error -- it is the request to fill a queue from the
+# plugin's own selection, which is what seed did before it could name a track, so
+# an empty list comes back and the caller carries on.
+#
+# The value is a comma-separated list, because a player's queue is rarely one
+# track. Neither a track id nor a URL the database holds contains a comma -- the
+# URLs are percent-encoded -- so the separator is unambiguous, and a single value
+# is simply a list of one.
 #
 # A URL that cannot be resolved is an error rather than something to ignore:
 # DSTM turns the queue's URLs into tracks with objectForUrl, and a URL it cannot
@@ -640,25 +645,47 @@ sub _trackUrl {
 	my $request = shift;
 
 	my $url = $request->getParam('url');
-	my $id  = _int( $request->getParam('id') );
+	my $id  = $request->getParam('id');
 
 	if ( defined $url && defined $id ) {
 		return ( undef, 'BAD_PARAMETER', 'give url: or id:, not both' );
 	}
 
-	return ( undef, undef, undef ) unless defined $url || defined $id;
+	return ( [], undef, undef ) unless defined $url || defined $id;
 
-	# Both lookups already exist in DSTM/Tracks.pm; reuse rather than reinvent.
-	my $track = defined $id
-		? eval { Slim::Schema->resultset('Track')->find($id) }
-		: eval { Slim::Schema->objectForUrl($url) };
+	my @wanted;
 
-	unless ( $track && $track->isa('Slim::Schema::Track') ) {
-		return ( undef, 'SEED_NOT_IN_LIBRARY',
-			'that track is not in the library, so no provider could derive from it' );
+	for my $part ( split /,/, ( defined $url ? $url : $id ) ) {
+		$part =~ s/^\s+|\s+$//g;
+
+		push @wanted, $part if length $part;
 	}
 
-	return ( $track->url, undef, undef );
+	unless (@wanted) {
+		return ( undef, 'BAD_PARAMETER', 'give at least one track to seed with' );
+	}
+
+	# Every one of them has to resolve: a seed half taken would leave the
+	# provider deriving from a list the caller did not ask for.
+	my %seen;
+	my @urls;
+
+	for my $want (@wanted) {
+
+		# Both lookups already exist in DSTM/Tracks.pm; reuse rather than reinvent.
+		my $track = defined $id
+			? eval { Slim::Schema->resultset('Track')->find( _int($want) ) }
+			: eval { Slim::Schema->objectForUrl($want) };
+
+		unless ( $track && $track->isa('Slim::Schema::Track') ) {
+			return ( undef, 'SEED_NOT_IN_LIBRARY',
+				"$want is not a track in the library, so no provider could derive from it" );
+		}
+
+		push @urls, $track->url unless $seen{ $track->url }++;
+	}
+
+	return ( \@urls, undef, undef );
 }
 
 # Say where to go, not only what is wrong. The setting lives in LMS, under the
@@ -696,12 +723,15 @@ sub _respond {
 	$request->addResult( 'added',    $added );
 	$request->addResult( 'total',    $total );
 
-	# The track the queue is now building around, if one was named. Reported so
+	# The tracks the queue is now building around, if any were named. Reported so
 	# that a caller can tell a seed that was taken from one that was ignored,
 	# which is otherwise invisible: a seed that never lands looks exactly like
 	# a queue that simply has not filled yet.
-	$request->addResult( 'seeded_track',
-		Plugins::RemotePlayerCompanion::DSTM::Queue->seed($rec)->[0] || '' );
+	#
+	# An array of URLs rather than the family's `*_loop`, which carries objects
+	# and has no shape for plain strings.
+	$request->addResult( 'seeded_tracks',
+		[ @{ Plugins::RemotePlayerCompanion::DSTM::Queue->seed($rec) } ] );
 
 	$request->setStatusDone;
 
@@ -720,9 +750,9 @@ sub _serve {
 
 	my $urls = Plugins::RemotePlayerCompanion::DSTM::Queue->take( $rec, $count );
 
-	# The seed follows the queue. Whatever this batch handed over last is what
-	# the queue is about now, and it is what the next fill derives from --
-	# whether or not this batch was the one that emptied the queue.
+	# The seed follows the queue. The tracks this batch handed over are what the
+	# queue is about now, and what the next fill derives from -- the whole batch,
+	# not its last track, whether or not it emptied the queue.
 	#
 	# That it is a track already handed out is the point, and it costs nothing:
 	# it has left the queue, so it cannot be served twice, and it is in the
@@ -736,10 +766,10 @@ sub _serve {
 	# newer to make it from, and dropping what is there would take away the one
 	# thing a deriving provider has left.
 	if ( @{$urls} ) {
-		Plugins::RemotePlayerCompanion::DSTM::Queue->setSeed( $rec, $urls->[-1] );
+		Plugins::RemotePlayerCompanion::DSTM::Queue->setSeed( $rec, @{$urls} );
 
 		main::DEBUGLOG && $log->is_debug && $log->debug(
-			"nextbatch $playerid: seed is now " . $urls->[-1] );
+			"nextbatch $playerid: seed is now these " . scalar( @{$urls} ) . " tracks" );
 	}
 
 	Plugins::RemotePlayerCompanion::DSTM::Queue->save($rec);

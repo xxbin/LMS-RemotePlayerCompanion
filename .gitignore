@@ -7,3 +7,7 @@ build/
 # with the published repository.
 CLAUDE.md
 docs/superpowers/
+
+# Design notes that are not part of the plugin and are not ready to be
+# published: read locally, not shipped.
+docs/proxy.md

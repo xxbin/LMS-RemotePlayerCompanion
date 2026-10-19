@@ -104,7 +104,7 @@ class Seed(DSTMTestCase):
         # First that it took at all: without this the assertion below passes
         # for the wrong reason, because a url the command ignored is a url
         # that never appears in a batch.
-        self.assertEqual(r.get("seeded_track"), url, "the seed was not taken")
+        self.assertEqual(r.get("seeded_tracks"), [url], "the seed was not taken")
 
         wait_for_fill(self.lms, self.playerid, 30)
 
@@ -115,6 +115,65 @@ class Seed(DSTMTestCase):
 
         self.assertNotIn(url, handed, "the seeded track was handed to the player")
         self.assertTrue(handed, "nothing at all was handed out")
+
+    def _library_urls(self, n):
+        r = self.lms.call(["tracks", 0, n, "tags:u"])
+        return [t["url"] for t in (r.get("titles_loop") or []) if t.get("url")]
+
+    def test_seed_takes_several_tracks(self):
+        """`url:` is a list rather than one track: what a player is playing is
+        rarely a single thing, and a provider deriving from several tracks
+        derives from more than the last one."""
+        urls = self._library_urls(2)
+        if len(urls) < 2:
+            self.skipTest("the library has fewer than two tracks to seed with")
+
+        self.lms.dstm("forget", self.playerid)
+        self.lms.dstm("config", self.playerid, f"token:{SEED_TOKEN}", "max:20")
+
+        r = self.lms.dstm("seed", self.playerid, "url:" + ",".join(urls))
+
+        self.assertIsNone((r.get("error") or {}).get("code"),
+                          f"a seed of several tracks was refused: {r.get('error')}")
+        self.assertEqual(r.get("seeded_tracks"), urls)
+
+    def test_a_seed_of_several_tracks_is_never_handed_out(self):
+        urls = self._library_urls(2)
+        if len(urls) < 2:
+            self.skipTest("the library has fewer than two tracks to seed with")
+
+        self.lms.dstm("forget", self.playerid)
+        self.lms.dstm("config", self.playerid, f"token:{SEED_TOKEN}", "max:40")
+        r = self.lms.dstm("seed", self.playerid, "url:" + ",".join(urls))
+        self.assertEqual(r.get("seeded_tracks"), urls, "the seed was not taken")
+
+        wait_for_fill(self.lms, self.playerid, 30)
+
+        handed = set()
+        for _ in range(3):
+            r = self.lms.dstm("nextbatch", self.playerid, "count:10")
+            handed |= {t["url"] for t in (r.get("batch_loop") or [])}
+
+        self.assertTrue(handed, "nothing at all was handed out")
+        self.assertFalse(set(urls) & handed, "a seeded track was handed to the player")
+
+    def test_one_track_outside_the_library_refuses_the_whole_seed(self):
+        """All of them or none: a seed half taken would leave the provider
+        deriving from a list the caller did not ask for."""
+        urls = self._library_urls(1)
+        if not urls:
+            self.skipTest("the library has no track to seed with")
+
+        self.lms.dstm("forget", self.playerid)
+        self.lms.dstm("config", self.playerid, f"token:{SEED_TOKEN}", "max:20")
+        before = self.lms.status(self.playerid).get("total")
+
+        r = self.lms.dstm("seed", self.playerid,
+                          "url:" + ",".join(urls) + ",file:///nope/not-a-track.mp3")
+
+        self.assertEqual((r.get("error") or {}).get("code"), "SEED_NOT_IN_LIBRARY")
+        self.assertEqual(self.lms.status(self.playerid).get("total"), before,
+                         "a refused seed changed the queue")
 
     def test_a_seed_that_is_not_in_the_library_is_refused(self):
         """A URL DSTM cannot resolve gives a deriving provider nothing, which

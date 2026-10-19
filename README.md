@@ -73,8 +73,9 @@ player never waits on a slow or asynchronous music-discovery provider.
 
 `config` is what gives a queue its provider — the queue's own, kept in its
 record and nowhere else — and `seed` then gives it something to work from, so
-those two are the order to use. Given a `url:` or `id:`, a seed builds the queue
-around that one track without ever handing it to the player. A `nextbatch` that
+those two are the order to use. Given `url:` or `id:` — a comma-separated list
+of tracks — a seed builds the queue around them without ever handing them to the
+player. A `nextbatch` that
 finds a queue with nothing in it gives it material the same way, though it cannot
 name a track to build around as `seed` can.
 

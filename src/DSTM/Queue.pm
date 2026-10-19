@@ -116,14 +116,14 @@ sub seed {
 	return $rec->{seed} ||= [];
 }
 
-# Replace the derivation material with a named track.
+# Replace the derivation material with the tracks given.
 #
-# Replaces rather than appends: "I am playing this now" is a statement about
-# the present, not an accumulation.
+# Replaces rather than appends: "this is what I am playing now" is a statement
+# about the present, not an accumulation.
 sub setSeed {
-	my ( $class, $rec, $url ) = @_;
+	my ( $class, $rec, @urls ) = @_;
 
-	$rec->{seed} = [ $url ];
+	$rec->{seed} = [ @urls ];
 
 	return $rec;
 }
