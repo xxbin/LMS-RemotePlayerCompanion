@@ -26,7 +26,12 @@ my $log = logger('plugin.remoteplayercompanion');
 
 use constant MAX_TRACKS     => 500;
 use constant WINDOW_SECONDS => 7 * 86400;
-use constant FUTURE_SLACK   => 60;
+
+# Five minutes, not one. The caller is a remote player on its own clock, and
+# a play time a little ahead of the server's is a clock disagreement, not a
+# backdated lie. The test environment alone has machines two minutes apart;
+# a phone that has not synced can be further. Anything past this is refused.
+use constant FUTURE_SLACK => 300;
 
 sub init {
 	Slim::Control::Request::addDispatch(

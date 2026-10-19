@@ -12,6 +12,7 @@ use warnings;
 
 use Slim::Utils::Log;
 
+use Plugins::RemotePlayerCompanion::History::APC;
 use Plugins::RemotePlayerCompanion::History::Stats;
 use Plugins::RemotePlayerCompanion::History::Store;
 
@@ -61,6 +62,34 @@ sub run {
 				: ' error=' . ( $result->{error} || '' )
 			)
 		);
+	}
+
+	my $apc_saved = 0;
+
+	for my $entry ( @new ) {
+		my $status;
+		my $apc_error;
+		eval {
+			$status = Plugins::RemotePlayerCompanion::History::APC->apply(
+				$entry, $playerid );
+			1;
+		} or $apc_error = $@ || 'unknown error';
+
+		$status ||= 'error';
+
+		main::DEBUGLOG && $log->is_debug && $log->debug(
+			'history apc: ' . $playerid . ' ' . $entry->{url}
+			. ' status=' . $status
+			. ( $apc_error ? ' error=' . $apc_error : '' )
+		);
+
+		# The player is recorded once per request, after the first row that
+		# landed -- not once per track.
+		if ( $status eq 'ok' && !$apc_saved ) {
+			Plugins::RemotePlayerCompanion::History::APC->savePlayer(
+				$playerid, $args->{playername} );
+			$apc_saved = 1;
+		}
 	}
 
 	my $nowplaying_status = $args->{nowplaying} ? 'unavailable' : 'skipped';

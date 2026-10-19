@@ -10,10 +10,12 @@ import os
 import sys
 import time
 import unittest
+import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
-from lmsrpc import LMS, RUN_ID, library_track_with_stats  # noqa: E402
+from lmsrpc import (LMS, RUN_ID, library_track_with_stats,  # noqa: E402
+                    require_player)
 
 
 def code_of(result):
@@ -48,7 +50,13 @@ class Targets(unittest.TestCase):
         self.playerid = f"rpc-target-{RUN_ID}"
         # A play time of this run's own, so the duplicate store does not
         # mistake it for a previous run's play.
-        self.played = int(time.time()) - 30 - (os.getpid() % 300)
+        # Unique per test as well as per run: two tests of one class would
+        # otherwise report the same play and the second would be a duplicate.
+        # A play time of this run's own, so the duplicate store does not
+        # mistake it for a previous run's play. The plugin's future allowance
+        # covers the skew between this machine's clock and the server's.
+        self.played = (int(time.time()) - 30
+                       - zlib.crc32(self.id().encode()) % 300)
 
     def report(self):
         r = self.lms.history(self.playerid, f"id:{self.track['id']}",
@@ -69,3 +77,32 @@ class Targets(unittest.TestCase):
         self.assertEqual(int(after), int(before) + 1)
         self.assertIsInstance(after, str,
                               "songinfo exposes the count as a string")
+
+    def test_a_reported_play_appears_in_the_apc_history(self):
+        """The row is filtered by the remote player's id, which this run
+        invented, so anything returned is the row this request wrote."""
+        player = require_player(self.lms)
+
+        r = self.report()
+        self.assertEqual(r.get("accepted"), 1)
+
+        history = self.lms.call(
+            ["alternativeplaycount", "jiveplayhistoryitems", "all", "",
+             self.playerid],
+            client=player,
+        )
+        if history.get("_error"):
+            self.skipTest(f"Alternative Play Count does not answer: "
+                          f"{history['_error']}")
+
+        enabled = self.lms.call(
+            ["pref", "plugin.alternativeplaycount:playhistory", "?"])
+        if enabled.get("_p2") in ("0", 0):
+            self.skipTest("Alternative Play Count's play history is off")
+
+        items = history.get("item_loop") or []
+        texts = [i.get("text", "") for i in items]
+        self.assertTrue(
+            any(self.track["title"][:25] in t for t in texts),
+            "the report did not reach APC's play history: "
+            f"{texts[:2]}")

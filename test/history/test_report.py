@@ -100,7 +100,7 @@ class Refusals(HistoryTestCase):
 
     def test_a_play_far_in_the_future_is_refused(self):
         r = self.lms.history("living-room", "id:1",
-                             f"played:{int(time.time()) + 120}")
+                             f"played:{int(time.time()) + 3600}")
         self.assertEqual(code_of(r), "INVALID_PLAYED")
 
     def test_too_many_entries_are_refused(self):
