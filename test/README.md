@@ -123,7 +123,7 @@ A report is a real write, and most of it cannot be undone from the plugin:
   `_client:__rpc_history_<id>` section in `plugin.audioscrobbler.prefs`,
   holding its account and any pending scrobbles.
 
-Expect **around four minutes** against a real server: 106 tests, of which 85
+Expect **around four minutes** against a real server: 107 tests, of which 86
 drive a server and most of those wait on fills that take a second or two; the
 other 21 are the packaging suite, which finishes before you notice it. The
 history suites add a few seconds. Most of the time is

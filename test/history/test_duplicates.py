@@ -63,6 +63,22 @@ class Duplicates(unittest.TestCase):
         self.assertEqual(second.get("accepted"), 0)
         self.assertEqual(second.get("duplicates"), 1)
 
+    def test_a_repeat_inside_one_report_is_counted_once(self):
+        # The identity does not care where the repeat came from: a caller
+        # whose local batch repeats a line reports the same play twice in
+        # one request, and the store would only catch it on the next one.
+        # A player of this test's own: the other test's play is the same
+        # track at nearly the same second, and the store outlives the process.
+        r = self.lms.history(
+            f"rpc-dup-in-{RUN_ID}",
+            f"id:{self.track['id']},{self.track['id']}",
+            f"played:{self.played},{self.played}",
+        )
+
+        self.assertIsNone(code_of(r), f"report refused: {r}")
+        self.assertEqual(r.get("accepted"), 1)
+        self.assertEqual(r.get("duplicates"), 1)
+
     def test_two_players_reporting_the_same_second_are_two_plays(self):
         first = self.report(playerid=f"rpc-dup-a-{RUN_ID}")
         second = self.report(playerid=f"rpc-dup-b-{RUN_ID}")

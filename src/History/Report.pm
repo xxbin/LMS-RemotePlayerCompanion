@@ -27,8 +27,22 @@ sub run {
 
 	my @new;
 	my $duplicates = 0;
+	my %in_request;
 
 	for my $entry ( @{$entries} ) {
+		# The store only knows what earlier requests marked, so a repeat
+		# inside this one has to be caught here as well: the identity is
+		# the same whoever repeats it.
+		my $key = $entry->{url} . "\0" . $entry->{played};
+
+		if ( $in_request{$key}++ ) {
+			$duplicates++;
+			main::DEBUGLOG && $log->is_debug && $log->debug(
+				"history duplicate in request: $playerid " . $entry->{url}
+				. ' at ' . $entry->{played} );
+			next;
+		}
+
 		if ( Plugins::RemotePlayerCompanion::History::Store->seen(
 				$playerid, $entry->{url}, $entry->{played} ) )
 		{
