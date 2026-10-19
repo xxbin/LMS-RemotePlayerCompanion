@@ -12,7 +12,7 @@ use warnings;
 
 use Slim::Music::Info;
 use Slim::Schema;
-use Slim::Utils::Misc;
+use Digest::MD5 qw(md5_hex);
 
 use Plugins::RemotePlayerCompanion::DSTM::Tracks;
 
@@ -45,7 +45,7 @@ sub entry {
 	my ( $class, $url, $track ) = @_;
 
 	my $urlmd5 = eval { $track->urlmd5 };
-	$urlmd5 ||= Slim::Utils::Misc::safe_md5_hex($url);
+	$urlmd5 ||= md5_hex($url);
 
 	return {
 		url     => $url,

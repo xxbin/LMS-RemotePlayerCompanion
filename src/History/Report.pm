@@ -12,26 +12,57 @@ use warnings;
 
 use Slim::Utils::Log;
 
+use Plugins::RemotePlayerCompanion::History::Store;
+
 my $log = logger('plugin.remoteplayercompanion');
 
 sub run {
 	my ( $class, $args ) = @_;
 
-	my $entries = $args->{entries} || [];
+	my $playerid = $args->{playerid};
+	my $entries  = $args->{entries} || [];
 
-	my $accepted = scalar @{$entries};
+	my @new;
+	my $duplicates = 0;
+
+	for my $entry ( @{$entries} ) {
+		if ( Plugins::RemotePlayerCompanion::History::Store->seen(
+				$playerid, $entry->{url}, $entry->{played} ) )
+		{
+			$duplicates++;
+			main::DEBUGLOG && $log->is_debug && $log->debug(
+				"history duplicate: $playerid " . $entry->{url}
+				. ' at ' . $entry->{played} );
+			next;
+		}
+
+		push @new, $entry;
+	}
+
+	my $accepted = scalar @new;
 
 	my $nowplaying_status = $args->{nowplaying} ? 'unavailable' : 'skipped';
 
+	# Marked after the last write, not before: a server that dies mid-entry
+	# should re-apply it on retry rather than forget it. The window is a few
+	# statements wide, and it is the at-least-once boundary.
+	Plugins::RemotePlayerCompanion::History::Store->mark(
+		$playerid, $_->{url}, $_->{played} ) for @new;
+
+	# `0 + $accepted` in the interpolation, not `$accepted`: interpolating a
+	# scalar marks it as a string, and these two go straight into the answer
+	# where the caller expects numbers.
 	main::DEBUGLOG && $log->is_debug && $log->debug(
-		'history report: ' . $args->{playerid}
+		'history report: ' . $playerid
 		. ' entries=' . scalar @{$entries}
+		. ' accepted=' . ( 0 + $accepted )
+		. ' duplicates=' . ( 0 + $duplicates )
 		. ' nowplaying=' . $nowplaying_status
 	);
 
 	return {
-		accepted          => $accepted,
-		duplicates        => 0,
+		accepted          => 0 + $accepted,
+		duplicates        => 0 + $duplicates,
 		queued            => 0,
 		nowplaying_status => $nowplaying_status,
 	};
