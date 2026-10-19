@@ -36,12 +36,12 @@ plugin's own version, read from `install.xml` — the only place it is written.
 |---|---|---|
 | [`dstm`](#the-dstm-family) | What to play next: a rolling queue filled from Dont Stop The Music providers | implemented |
 | `convert` | What the player can play: the server's transcoding and format support | planned |
-| `history` | What the player has played: listening done offline, reported back to the server | planned |
+| `history` | What the player has played: listening done offline, reported back to the server | implemented |
 | `favorites` | Favourites: the server's and the player's, kept in step in both directions | planned |
 | `rating` | Track ratings: the server's and the player's, kept in step in both directions | planned |
 
-Only `dstm` exists today. The others are listed so the shape of the plugin is
-clear, not because anything is stubbed out for them.
+Only `dstm` and `history` exist today. The others are listed so the shape of
+the plugin is clear, not because anything is stubbed out for them.
 
 ### The shape every family shares
 
@@ -86,6 +86,36 @@ The rest of it — each command and the parameters it takes, the shapes it
 answers with, the errors it raises, and why the queue is built the way it is
 — is in **[docs/DSTM.md](docs/DSTM.md)**.
 
+## The `history` family
+
+Listening a remote player did while it was away from the server, reported back
+in a batch and recorded where the server already keeps history: LMS's play
+count, Alternative Play Count's Play History, and the AudioScrobbler account
+configured on the server.
+
+```
+["", ["remoteplayercompanion", "history", "report",
+      "playerid:living-room",
+      "id:27189,27198",
+      "played:1792441378,1792441450",
+      "nowplaying:27199"]]
+```
+
+`id` or `url` carries a comma-separated batch; `played` carries each track's
+start time in epoch seconds and is accepted only for the last seven days.
+`nowplaying`, when present, is one track handed to the AudioScrobbler API
+after the batch. There is no account parameter: the server's saved account is
+used, and credentials never travel in the request.
+
+A successful answer is a receipt — `accepted`, `duplicates`, `queued`,
+`nowplaying_status` — and it transfers ownership: the caller deletes its copy.
+Every request the plugin cannot record in full is therefore refused before
+anything is written.
+
+The rest of it — every parameter and refusal, what each destination gets, the
+synthetic client AudioScrobbler needs, and the side effects worth knowing —
+is in **[docs/HISTORY.md](docs/HISTORY.md)**.
+
 ## The remote player is not an LMS client
 
 This applies to every family, and it is the one decision the rest follows from.
@@ -118,6 +148,15 @@ LMS's plugin directories:
 │   ├── RandomPlay.pm  the RandomPlay coupling: recipes and id selection
 │   ├── Tracks.pm      ids and db: entities into playable track URLs
 │   └── VClient.pm     the synthetic client handed to providers
+├── History/           the 'remoteplayercompanion history *' family
+│   ├── CLI.pm         the command and its registration
+│   ├── Track.pm       ids and urls resolved to a track object
+│   ├── Report.pm      the operation: order of writes, and what it logs
+│   ├── Stats.pm       LMS's play count and lastplayed
+│   ├── APC.pm         Alternative Play Count's play history
+│   ├── Scrobbler.pm   AudioScrobbler's queue and now-playing
+│   ├── Store.pm       the duplicate key
+│   └── VClient.pm     the synthetic client AudioScrobbler needs
 ├── install.xml
 └── strings.txt
 ```

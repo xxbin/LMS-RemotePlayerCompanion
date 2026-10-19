@@ -51,6 +51,16 @@ test/
     └── test_defaults.py        the default depth and batch size, and seed
 ```
 
+`history/` holds the other family:
+
+```
+test/history/
+├── test_report.py      the request contract: refusals, and the receipt
+├── test_duplicates.py  one report twice is one play
+├── test_targets.py     where a play lands: the play count, then APC
+└── test_nowplaying.py  the AudioScrobbler queue and now-playing
+```
+
 `packaging/` is the one directory that is not an integration suite: it checks
 what `build.py` produces, so it needs no server and does not inherit
 `DSTMTestCase`. It runs in a fraction of a second, and it is the reason a
@@ -95,10 +105,28 @@ worth knowing before running these against a server you care about:
 reports is used. **No player id is ever hardcoded here** — this repository is
 public, and a MAC address is somebody's device.
 
-Expect **around three and a half minutes** against a real server: 74 tests, of which 53
+### What the history suites do to a server
+
+A report is a real write, and most of it cannot be undone from the plugin:
+
+- **A reported play increments a real library track's play count.** The suite
+  prints the count before and after each such test. It can be reset from the
+  track's information page in LMS's web UI.
+- **APC rows are written** under the run's own remote player id, so they can be
+  removed from APC's play history view.
+- **A server with an AudioScrobbler account configured scrobbles them.** That
+  is the feature being tested, not a leak. The two tests that need an account
+  run only under `LMS_HISTORY_SCROBBLE=1` so that a run says when it is about
+  to submit to a real profile; every other test still submits when the server
+  has an account, and must be run against a profile you mean to write to.
+- Each remote player id the suites use gains a
+  `_client:__rpc_history_<id>` section in `plugin.audioscrobbler.prefs`,
+  holding its account and any pending scrobbles.
+
+Expect **around four minutes** against a real server: 106 tests, of which 85
 drive a server and most of those wait on fills that take a second or two; the
-other 21 are the packaging suite, which finishes before you notice it. Two
-thirds of the time is
+other 21 are the packaging suite, which finishes before you notice it. The
+history suites add a few seconds. Most of the time is
 `test_sources`, which seeds a queue and offers it to each of two dozen
 providers in turn -- the per-provider progress it prints as it goes is the
 best way to see where the time lands. The rest is real waiting on real

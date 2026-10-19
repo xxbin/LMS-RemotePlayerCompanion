@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <extension>
 	<id>306aba53-031e-4885-8031-5352d8d3291d</id>
-	<version>0.4.0</version>
+	<version>0.5.0</version>
 	<name>PLUGIN_REMOTEPLAYERCOMPANION_NAME</name>
 	<description>PLUGIN_REMOTEPLAYERCOMPANION_DESC</description>
 	<module>Plugins::RemotePlayerCompanion::Plugin</module>
