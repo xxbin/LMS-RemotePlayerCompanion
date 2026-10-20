@@ -120,19 +120,17 @@ A report is a real write, and most of it cannot be undone from the plugin:
   when it is about to submit to a real profile; every other test still submits
   when the server has an account, and must be run against a profile you mean
   to write to.
-- Each remote player id the suites use gains a
-  `_client:__rpc_history_<id>` section in `plugin.audioscrobbler.prefs`,
-  holding its account and any pending scrobbles.
+- Each remote player id the suites use gains a `_client:<playerid>` section
+  in `plugin.audioscrobbler.prefs`, holding its account and any pending
+  scrobbles. A player id that changes per run leaves one section per run.
 
-Expect **around four minutes** against a real server: 109 tests, of which 88
-drive a server and most of those wait on fills that take a second or two; the
-other 21 are the packaging suite, which finishes before you notice it. The
-history suites add a few seconds. Most of the time is
-`test_sources`, which seeds a queue and offers it to each of two dozen
-providers in turn -- the per-provider progress it prints as it goes is the
-best way to see where the time lands. The rest is real waiting on real
-fills; cutting it further would mean cutting waits and retries, which is
-coverage paid for with speed.
+Expect **several minutes** against a real server. Most of the time is
+`test_sources`, which seeds a queue and offers it to each provider in turn --
+the per-provider progress it prints as it goes is the best way to see where
+the time lands -- and the rest is real waiting on real fills: cutting that
+further would mean cutting the waits and retries, which is coverage paid for
+with speed. The packaging suite needs no server and is over before you notice
+it.
 
 | Suite | Also needs |
 |---|---|

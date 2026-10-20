@@ -231,13 +231,26 @@ for the first call and is lost at the first of those.
 So one hidden client is created per remote player, from
 `Slim::Player::Disconnected`. It is invisible to the `players` query, the web
 UI and sync lists (`hidden` clients are filtered out), and it keeps each
-remote player's account, queue and session to itself. The id is
-`__rpc_history_<playerid>`, prefixed so it cannot collide with a MAC address.
+remote player's account, queue and session to itself.
+
+Its id is the **remote player's own id** — the same value APC records as
+`client_id` and the duplicate store keys on. One remote player is one identity
+in every destination, so the client's `_client:<playerid>` preferences and its
+APC player row describe the same thing, and both survive restarts because the
+id is the caller's own rather than one allocated here.
+
+If LMS already keeps a client under that id — a player that also connects to
+the server, or LMS's disconnected record of one — that client is used: same
+id, same player, same account and queue. `getClient` matches names as well as
+ids, so the returned id is compared: a client reached by its **name** is a
+different player, and the plugin refuses rather than spending that player's
+account and queue on this one. The report still succeeds; scrobbling is
+logged as unavailable.
 
 ## Side effects worth knowing
 
-- **Each remote player gains one `_client:__rpc_history_<playerid>` section**
-  in `plugin.audioscrobbler.prefs`, holding its account and any pending
+- **Each remote player gains one `_client:<playerid>` section** in
+  `plugin.audioscrobbler.prefs`, holding its account and any pending
   scrobbles. A player id that changes per request (as the test suite's do)
   leaves one section per id.
 - **Reporting real plays to a server with an account configured scrobbles

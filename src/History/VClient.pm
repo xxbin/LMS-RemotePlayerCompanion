@@ -22,17 +22,33 @@ use Slim::Player::Client;
 
 use parent 'Slim::Player::Disconnected';
 
-our %CLIENTS;
-
-# The id is internal and prefixed so it cannot collide with a MAC address.
-# Never construct the same id twice: Client::new asserts the id is unknown.
+# The client's id is the remote player's own id: the same value APC records
+# as `client_id` and the duplicate store keys on. One remote player is one
+# identity in every destination, so the `_client:<id>` preferences this client
+# keeps its account and pending queue in describe the same player APC's
+# history does -- and stay put across requests and restarts, because the id
+# is not allocated but is the caller's own.
+#
+# Client::new registers the client in %clientHash, so the id must not already
+# be another client's. getClient matches by name and by address as well as by
+# id, so the id is compared rather than trusted: a client returned for its
+# *name* is a different player, and adopting it would spend its account and
+# queue on this one. That is refused; the report still succeeds, scrobbling
+# is logged as unavailable.
 sub forPlayer {
 	my ( $class, $playerid ) = @_;
 
-	my $id = '__rpc_history_' . $playerid;
+	my $client = Slim::Player::Client::getClient($playerid);
 
-	return $CLIENTS{$id} ||= Slim::Player::Client::getClient($id)
-		|| $class->new($id);
+	if ($client) {
+		# Ours from an earlier request, or a client LMS already keeps under
+		# this id -- the same player either way, and the same preferences.
+		return $client if $client->id eq $playerid;
+
+		die "history client: $playerid is another client's name\n";
+	}
+
+	return $class->new($playerid);
 }
 
 # Client::ipport asserts a paddr, and Client::ip splits one. A synthetic
