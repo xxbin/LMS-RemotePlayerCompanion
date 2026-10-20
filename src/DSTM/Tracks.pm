@@ -75,6 +75,50 @@ sub tracksForEntity {
 	return $ids;
 }
 
+# A track described for a log line: title, artist, album, id and url.
+#
+# Best-effort by design. The objects a report or a queue carries are not always
+# library rows -- a remote track is an ephemeral RemoteTrack, and a provider
+# may answer with a URL the database has never seen -- so every field is
+# resolved on its own. A missing one is left empty rather than hiding the url,
+# which is often the clue being looked for when a line like this is read.
+sub describe {
+	my ( $class, $track, $url ) = @_;
+
+	$url = eval { $track->url }
+		if !defined $url && ref $track && $track->can('url');
+
+	$track = eval { Slim::Schema->objectForUrl( { url => $url } ) }
+		if !ref $track && defined $url && length $url;
+
+	my $id     = ref $track ? eval { $track->id }         : undef;
+	my $title  = ref $track ? eval { $track->title }      : undef;
+	my $artist = ref $track ? eval { $track->artistName } : undef;
+	my $album  = ref $track ? eval { $track->albumname }  : undef;
+
+	return join( ' ',
+		'title="' . _oneLine($title) . '"',
+		'artist="' . _oneLine($artist) . '"',
+		'album="' . _oneLine($album) . '"',
+		'id=' . ( defined $id ? $id : '-' ),
+		'url=' . ( defined $url && length $url ? $url : '-' ),
+	);
+}
+
+# Tags come from files, so they may contain newlines or runs of whitespace.
+# One log line per track is the point; keeping the record on one line is what
+# makes a run of them readable.
+sub _oneLine {
+	my $value = shift;
+
+	return '' unless defined $value;
+
+	$value =~ s/\s+/ /g;
+	$value =~ s/^\s+|\s+$//g;
+
+	return $value;
+}
+
 # Expand a 'db:<entity>' URL into the tracks it stands for.
 #
 # Some providers answer with these instead of with tracks: a favourite or a

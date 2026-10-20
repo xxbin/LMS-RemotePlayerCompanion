@@ -22,6 +22,7 @@ use Scalar::Util qw(blessed);
 use Plugins::RemotePlayerCompanion::DSTM::Provider;
 use Plugins::RemotePlayerCompanion::DSTM::Refill;
 use Plugins::RemotePlayerCompanion::DSTM::Queue;
+use Plugins::RemotePlayerCompanion::DSTM::Tracks;
 use Plugins::RemotePlayerCompanion::DSTM::VClient;
 use Slim::Control::Request;
 use Slim::Schema;
@@ -770,6 +771,18 @@ sub _serve {
 
 		main::DEBUGLOG && $log->is_debug && $log->debug(
 			"nextbatch $playerid: seed is now these " . scalar( @{$urls} ) . " tracks" );
+
+		# What the provider will derive its next selection from, one line per
+		# track. The count above says how much material there is; these say
+		# which tracks it is, which is what a disappointing or unexpected
+		# batch is usually explained by. Guarded as a block because resolving
+		# each url is a lookup, and none of it should happen above DEBUG.
+		if ( main::DEBUGLOG && $log->is_debug ) {
+			for my $url ( @{$urls} ) {
+				$log->debug( 'nextbatch ' . $playerid . ': seed track '
+					. Plugins::RemotePlayerCompanion::DSTM::Tracks->describe( undef, $url ) );
+			}
+		}
 	}
 
 	Plugins::RemotePlayerCompanion::DSTM::Queue->save($rec);

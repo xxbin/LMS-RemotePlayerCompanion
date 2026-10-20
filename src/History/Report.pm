@@ -16,6 +16,7 @@ use Plugins::RemotePlayerCompanion::History::APC;
 use Plugins::RemotePlayerCompanion::History::Scrobbler;
 use Plugins::RemotePlayerCompanion::History::Stats;
 use Plugins::RemotePlayerCompanion::History::Store;
+use Plugins::RemotePlayerCompanion::DSTM::Tracks;
 
 my $log = logger('plugin.remoteplayercompanion');
 
@@ -141,6 +142,20 @@ sub run {
 	# Scrobbles, then the present tense: LMS's own newsongCallback does the
 	# same, so a queued scrobble cannot clobber the now-playing display.
 	my $queued = $scrobbler->enqueue( \@scrobble );
+
+	# Each entry this report recorded, named in full. The per-destination
+	# lines above say how one fared but identify it only by url; this is the
+	# line that answers "what was that song" when a report is being traced.
+	# Duplicates never reach here -- they have their own lines above.
+	if ( main::DEBUGLOG && $log->is_debug ) {
+		for my $entry ( @new ) {
+			$log->debug(
+				'history recorded: ' . $playerid . ' '
+					. Plugins::RemotePlayerCompanion::DSTM::Tracks->describe(
+						$entry->{track}, $entry->{url} )
+					. ' played=' . $entry->{played} );
+		}
+	}
 
 	# Now-playing is decided from the play times, not from a parameter: the
 	# newest accepted play is what the player is on, and Scrobbler announces
