@@ -115,15 +115,16 @@ A report is a real write, and most of it cannot be undone from the plugin:
 - **APC rows are written** under the run's own remote player id, so they can be
   removed from APC's play history view.
 - **A server with an AudioScrobbler account configured scrobbles them.** That
-  is the feature being tested, not a leak. The two tests that need an account
-  run only under `LMS_HISTORY_SCROBBLE=1` so that a run says when it is about
-  to submit to a real profile; every other test still submits when the server
-  has an account, and must be run against a profile you mean to write to.
+  is the feature being tested, not a leak. The tests that also announce a
+  now-playing track run only under `LMS_HISTORY_SCROBBLE=1` so that a run says
+  when it is about to submit to a real profile; every other test still submits
+  when the server has an account, and must be run against a profile you mean
+  to write to.
 - Each remote player id the suites use gains a
   `_client:__rpc_history_<id>` section in `plugin.audioscrobbler.prefs`,
   holding its account and any pending scrobbles.
 
-Expect **around four minutes** against a real server: 107 tests, of which 86
+Expect **around four minutes** against a real server: 109 tests, of which 88
 drive a server and most of those wait on fills that take a second or two; the
 other 21 are the packaging suite, which finishes before you notice it. The
 history suites add a few seconds. Most of the time is

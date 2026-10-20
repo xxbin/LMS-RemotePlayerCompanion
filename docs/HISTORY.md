@@ -10,8 +10,7 @@ about before running it against a server you care about.
 
 ## What it is
 
-One request carries a batch of plays and, optionally, one now-playing track.
-For every play the plugin updates:
+One request carries a batch of plays. For every play the plugin updates:
 
 - **LMS's play count** — `tracks_persistent`, the count the web UI shows;
 - **Alternative Play Count's Play History** — the row APC's own analyser would
@@ -50,13 +49,11 @@ left for the caller to retry.
 | `id` | one of `id`/`url` | Comma-separated LMS track ids |
 | `url` | one of `id`/`url` | Comma-separated track URLs |
 | `played` | no | Comma-separated epoch **seconds**, one per track, same order |
-| `nowplaying` | no | One track id or one URL |
 | `playername` | no | Display name for APC's player list, 1–64 printable characters |
 
-At least one of `id`, `url` or `nowplaying` must be present.
-
-- `id` and `url` are mutually exclusive. A value of all digits in `nowplaying`
-  is an id; anything else is a URL.
+- One of `id` or `url` must be present; they are mutually exclusive.
+- There is no now-playing parameter. The plugin decides from the play times:
+  see [Now-playing](#now-playing).
 - At most **500** entries per request.
 - An empty item, a trailing comma or an empty list is refused rather than
   trimmed: a malformed element means the positional match with `played` may be
@@ -113,7 +110,8 @@ and so APC has a URL to record.
   it (`too_short`, `ignored`, radio), and it is 0 when scrobbling is off, no
   account is configured, or the plugin is missing.
 - `nowplaying_status` — `requested` (handed to the AudioScrobbler API),
-  `skipped` (the request carried no `nowplaying`), or `unavailable`.
+  `skipped` (the newest play has ended, or its duration is unknown), or
+  `unavailable` (the scrobbler would not take the track).
 
 There is no per-track loop and no account field. How each destination fared is
 a debug log line per entry, under the plugin's own log category.
@@ -122,8 +120,8 @@ a debug log line per entry, under the plugin's own log category.
 
 | Code | When |
 |---|---|
-| `MISSING_PARAMETER` | no `playerid`; no `id`, `url`, or `nowplaying` |
-| `BAD_PARAMETER` | malformed `playerid`/`playername`, both `id` and `url`, an empty item or list, a malformed `nowplaying` |
+| `MISSING_PARAMETER` | no `playerid`; neither `id` nor `url` |
+| `BAD_PARAMETER` | malformed `playerid`/`playername`, both `id` and `url`, an empty item or list |
 | `TOO_MANY_TRACKS` | more than 500 entries |
 | `LIST_LENGTH_MISMATCH` | `played` count differs from the track count |
 | `INVALID_PLAYED` | a `played` value is not an integer, or lies outside the window |
@@ -185,12 +183,27 @@ is what every later LMS path reads. Older LMS stores a bare username there,
 newer LMS the full `username::api_type::api_url` id; the plugin asks the server
 which it expects rather than assuming.
 
-**Now-playing.** After the scrobbles are queued — so a scrobble does not
-clobber the display — the one `nowplaying` value is handed to the API. It is
-subject to the same eligibility checks, unlike LMS's own callback, which
-announces before applying its ignore lists: a track the user told LMS to ignore
-is not announced either. Only the current request's value is ever submitted;
-historical now-playing is never replayed.
+### Now-playing
+
+There is no now-playing parameter. A player has one current track, and the
+batch already says when each play started, so the plugin reads it from there:
+
+- The **newest accepted play** in the request is the candidate. Play time
+  decides, not position in the list; on a tie (a request without `played`
+  stamps every entry with one `now`) the last entry wins.
+- It is announced only if the server's clock is still inside that track's
+  **duration** — `now - played < duration`. A play that has ended announces
+  nothing, which is also what keeps a retried report (every entry a
+  duplicate, so nothing accepted) from announcing again.
+- No duration means no way to judge, and the plugin does not guess: the play
+  is recorded and the status is `skipped`.
+- The candidate is subject to the same eligibility checks as a scrobble,
+  unlike LMS's own callback, which announces before applying its ignore
+  lists: a track the user told LMS to ignore is not announced either.
+
+After the scrobbles are queued — so a scrobble does not clobber the display —
+the candidate is handed to the API. Historical now-playing is never replayed:
+only the newest play of the current request can be announced.
 
 **Order of writes.** Everything that can refuse the request is decided first:
 scrobbler eligibility and the queue cap. Then LMS, then APC, then the scrobble

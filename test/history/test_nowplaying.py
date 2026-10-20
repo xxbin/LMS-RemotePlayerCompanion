@@ -88,25 +88,22 @@ class NowPlaying(unittest.TestCase):
                 "no library track of 30 seconds or more carries a play count")
 
     def setUp(self):
-        self.playerid = f"rpc-now-{RUN_ID}"
-        # Unique per test, and inside the plugin's future allowance: this
-        # machine's clock and the server's differ by seconds, not minutes.
-        self.played = (int(time.time()) - 30
-                       - zlib.crc32(self.id().encode()) % 300)
+        # A player of this test's own: several tests report the same track
+        # at the same second, and the duplicate store outlives the process.
+        tag = zlib.crc32(self.id().encode()) % 100000
+        self.playerid = f"rpc-now-{RUN_ID}-{tag}"
+        self.now = int(time.time())
+        self.duration = int(float(self.track.get("duration") or 0))
 
     def report(self, *params):
         r = self.lms.history(self.playerid, *params)
         self.assertIsNone(code_of(r), f"report refused: {r}")
         return r
 
-    def test_without_a_value_the_status_is_skipped(self):
-        r = self.report(f"id:{self.track['id']}", f"played:{self.played}")
-
-        self.assertEqual(r.get("nowplaying_status"), "skipped")
-
-    def test_an_account_means_now_playing_is_requested(self):
+    def test_a_play_inside_its_duration_is_now_playing(self):
         if not (self.enabled and self.accounts):
-            r = self.report(f"nowplaying:{self.track['id']}")
+            r = self.report(f"id:{self.track['id']}",
+                            f"played:{self.now - 5}")
             self.assertEqual(r.get("nowplaying_status"), "unavailable")
             return
 
@@ -115,7 +112,53 @@ class NowPlaying(unittest.TestCase):
                 "this would announce a track to the configured Last.fm "
                 "account; set LMS_HISTORY_SCROBBLE=1 to run it")
 
-        r = self.report(f"nowplaying:{self.track['id']}")
+        r = self.report(f"id:{self.track['id']}", f"played:{self.now - 5}")
+
+        self.assertEqual(r.get("nowplaying_status"), "requested")
+
+    def test_a_play_that_has_ended_is_not_now_playing(self):
+        # Ten minutes past the track's end, so the two clocks' few minutes
+        # of disagreement cannot make it look current.
+        r = self.report(f"id:{self.track['id']}",
+                        f"played:{self.now - self.duration - 600}")
+
+        self.assertEqual(r.get("nowplaying_status"), "skipped")
+
+    def test_the_order_of_entries_does_not_decide(self):
+        # The current play is listed first and the finished one second: the
+        # later entry is not the newest play, the play time is.
+        params = (f"id:{self.track['id']},{self.track['id']}",
+                  f"played:{self.now - 5},{self.now - self.duration - 600}")
+
+        if not (self.enabled and self.accounts):
+            r = self.report(*params)
+            self.assertEqual(r.get("nowplaying_status"), "unavailable")
+            return
+
+        if not SCROBBLE:
+            self.skipTest(
+                "this would announce a track to the configured Last.fm "
+                "account; set LMS_HISTORY_SCROBBLE=1 to run it")
+
+        r = self.report(*params)
+
+        self.assertEqual(r.get("nowplaying_status"), "requested")
+
+    def test_a_finished_play_does_not_hide_a_current_one(self):
+        params = (f"id:{self.track['id']},{self.track['id']}",
+                  f"played:{self.now - self.duration - 600},{self.now - 5}")
+
+        if not (self.enabled and self.accounts):
+            r = self.report(*params)
+            self.assertEqual(r.get("nowplaying_status"), "unavailable")
+            return
+
+        if not SCROBBLE:
+            self.skipTest(
+                "this would announce a track to the configured Last.fm "
+                "account; set LMS_HISTORY_SCROBBLE=1 to run it")
+
+        r = self.report(*params)
 
         self.assertEqual(r.get("nowplaying_status"), "requested")
 
@@ -127,7 +170,8 @@ class NowPlaying(unittest.TestCase):
                 "this would scrobble a real play to the configured Last.fm "
                 "account; set LMS_HISTORY_SCROBBLE=1 to run it")
 
-        r = self.report(f"id:{self.track['id']}", f"played:{self.played}")
+        r = self.report(f"id:{self.track['id']}",
+                        f"played:{self.now - self.duration - 600}")
 
         self.assertEqual(r.get("accepted"), 1)
         self.assertEqual(r.get("queued"), 1)
@@ -137,7 +181,8 @@ class NowPlaying(unittest.TestCase):
             self.skipTest(
                 "scrobbling is configured; the queued test covers this server")
 
-        r = self.report(f"id:{self.track['id']}", f"played:{self.played}")
+        r = self.report(f"id:{self.track['id']}",
+                        f"played:{self.now - self.duration - 600}")
 
         self.assertEqual(r.get("accepted"), 1)
         self.assertEqual(r.get("queued"), 0)

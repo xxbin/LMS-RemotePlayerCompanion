@@ -97,15 +97,15 @@ configured on the server.
 ["", ["remoteplayercompanion", "history", "report",
       "playerid:living-room",
       "id:27189,27198",
-      "played:1792441378,1792441450",
-      "nowplaying:27199"]]
+      "played:1792441378,1792441450"]]
 ```
 
 `id` or `url` carries a comma-separated batch; `played` carries each track's
 start time in epoch seconds and is accepted only for the last seven days.
-`nowplaying`, when present, is one track handed to the AudioScrobbler API
-after the batch. There is no account parameter: the server's saved account is
-used, and credentials never travel in the request.
+Now-playing takes no parameter either: the plugin announces the batch's newest
+play when the server's clock is still inside that track's duration. There is
+no account parameter: the server's saved account is used, and credentials
+never travel in the request.
 
 A successful answer is a receipt — `accepted`, `duplicates`, `queued`,
 `nowplaying_status` — and it transfers ownership: the caller deletes its copy.

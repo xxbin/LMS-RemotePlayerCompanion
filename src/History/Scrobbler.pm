@@ -309,17 +309,32 @@ sub enqueue {
 	return scalar @{$items};
 }
 
-# Hand one track to the API as now-playing.
+# Hand the batch's newest play to the API as now-playing, if it is still
+# playing.
 #
-# Only ever called for the request's single `nowplaying` value, after the
-# scrobbles were queued: LMS's newsongCallback does the same, so a scrobble
-# does not clobber the display. The scrobble's HTTP response is not waited
-# for -- the queue retries in the background, and a failing scrobble must not
-# delay the present tense.
+# `played` is the instant the track started, so the server's clock being
+# inside the track's duration is what makes it the present tense: a report
+# that arrives after the track ended announces nothing. No duration means no
+# way to judge, and announcing on a guess would show the wrong track. The
+# item decides eligibility: a track LMS would not scrobble is not announced
+# either, which is the one deliberate difference from LMS's newsongCallback
+# -- it announces before applying the ignore lists.
+#
+# Called after the scrobbles were queued, so a scrobble does not clobber the
+# display. The scrobble's HTTP response is not waited for -- the queue
+# retries in the background, and a failing scrobble must not delay the
+# present tense.
 sub nowPlaying {
-	my ( $self, $track ) = @_;
+	my ( $self, $entry, $item, $now ) = @_;
 
 	return 'unavailable' unless $self->{status} eq 'ok' && $self->{client};
+	return 'unavailable' unless $item;
+
+	my $duration = $item->{l} || 0;
+	return 'skipped' unless $duration;
+
+	$now ||= time();
+	return 'skipped' if $now - $entry->{played} >= $duration;
 
 	my $api = eval {
 		require Slim::Plugin::AudioScrobbler::API;
@@ -333,7 +348,7 @@ sub nowPlaying {
 		return 'unavailable';
 	}
 
-	my $ok = eval { $api->submitNowPlaying($track); 1 };
+	my $ok = eval { $api->submitNowPlaying( $entry->{track} ); 1 };
 
 	if ( !$ok ) {
 		$log->error(

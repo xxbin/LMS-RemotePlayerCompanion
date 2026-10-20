@@ -58,18 +58,17 @@ sub cliReport {
 			'playername must be 1 to 64 printable characters' );
 	}
 
-	my $idlist     = $request->getParam('id');
-	my $urllist    = $request->getParam('url');
-	my $nowplaying = $request->getParam('nowplaying');
+	my $idlist  = $request->getParam('id');
+	my $urllist = $request->getParam('url');
 
 	if ( defined $idlist && defined $urllist ) {
 		return _fail( $request, 'BAD_PARAMETER',
 			'id and url are mutually exclusive' );
 	}
 
-	if ( !defined $idlist && !defined $urllist && !defined $nowplaying ) {
+	if ( !defined $idlist && !defined $urllist ) {
 		return _fail( $request, 'MISSING_PARAMETER',
-			'one of id, url or nowplaying is required' );
+			'one of id or url is required' );
 	}
 
 	my $is_id = defined $idlist;
@@ -98,30 +97,12 @@ sub cliReport {
 		push @entries, $entry;
 	}
 
-	my $now_entry;
-	if ( defined $nowplaying ) {
-		if ( !length $nowplaying || $nowplaying =~ /\s/ ) {
-			return _fail( $request, 'BAD_PARAMETER', 'nowplaying is malformed' );
-		}
-
-		my $maybe_id = $nowplaying =~ /^\d+$/ ? 1 : 0;
-
-		$now_entry = eval {
-			Plugins::RemotePlayerCompanion::History::Track->resolve(
-				$nowplaying, $maybe_id )
-		};
-		return _fail( $request, 'UNRESOLVED_TRACK',
-			'cannot resolve nowplaying: ' . $nowplaying )
-			unless $now_entry;
-	}
-
 	my $receipt = eval {
 		Plugins::RemotePlayerCompanion::History::Report->run(
 			{
 				playerid   => $playerid,
 				playername => $playername,
 				entries    => \@entries,
-				nowplaying => $now_entry,
 				now        => $now,
 			}
 		);

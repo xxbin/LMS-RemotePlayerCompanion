@@ -33,7 +33,7 @@ sub run {
 		# The store only knows what earlier requests marked, so a repeat
 		# inside this one has to be caught here as well: the identity is
 		# the same whoever repeats it.
-		my $key = $entry->{url} . "\0" . $entry->{played};
+		my $key = _key($entry);
 
 		if ( $in_request{$key}++ ) {
 			$duplicates++;
@@ -65,6 +65,7 @@ sub run {
 	my $scrobbler = Plugins::RemotePlayerCompanion::History::Scrobbler->new($playerid);
 
 	my @scrobble;
+	my %eligible;
 	for my $entry ( @new ) {
 		my ( $ok, $reason, $item ) = $scrobbler->eligible($entry);
 
@@ -72,6 +73,8 @@ sub run {
 			'history scrobbler: ' . $playerid . ' ' . $entry->{url}
 			. ' status=' . ( $ok ? 'queued' : $reason ) )
 			if main::DEBUGLOG && $log->is_debug;
+
+		$eligible{ _key($entry) } = [ $ok, $reason, $item ];
 
 		push @scrobble, $item if $ok;
 	}
@@ -84,11 +87,6 @@ sub run {
 					. $scrobbler->pending . ' entries',
 			},
 		};
-	}
-
-	my $nowplaying_ok = 0;
-	if ( $args->{nowplaying} ) {
-		( $nowplaying_ok ) = $scrobbler->eligible( $args->{nowplaying} );
 	}
 
 	# Local writes first: they are the durable record and cannot fail
@@ -144,11 +142,25 @@ sub run {
 	# same, so a queued scrobble cannot clobber the now-playing display.
 	my $queued = $scrobbler->enqueue( \@scrobble );
 
+	# Now-playing is decided from the play times, not from a parameter: the
+	# newest accepted play is what the player is on, and Scrobbler announces
+	# it only while the server's clock is still inside its duration. A
+	# retried report (every entry a duplicate) therefore announces nothing.
 	my $nowplaying_status = 'skipped';
-	if ( $args->{nowplaying} ) {
-		$nowplaying_status = $nowplaying_ok
-			? $scrobbler->nowPlaying( $args->{nowplaying}{track} )
-			: 'unavailable';
+	my $newest            = _newest( \@new );
+
+	if ($newest) {
+		my ( $ok, $reason, $item ) =
+			@{ $eligible{ _key($newest) } || [ 0, 'unsupported' ] };
+
+		$nowplaying_status =
+			$scrobbler->nowPlaying( $newest, $ok ? $item : undef, $args->{now} );
+
+		$log->debug(
+			'history now playing: ' . $playerid . ' ' . $newest->{url}
+			. ' scrobble=' . ( $ok ? 'eligible' : $reason )
+			. ' status=' . $nowplaying_status )
+			if main::DEBUGLOG && $log->is_debug;
 	}
 
 	# Marked after the last write, not before: a server that dies mid-entry
@@ -183,6 +195,28 @@ sub run {
 		queued            => 0 + $queued,
 		nowplaying_status => $nowplaying_status,
 	};
+}
+
+# The identity of a play inside one request: the player is constant here, so
+# the URL and the play time are enough, as they are for Store.
+sub _key {
+	my $entry = shift;
+
+	return $entry->{url} . "\0" . $entry->{played};
+}
+
+# The latest play in the batch. Ties go to the later entry: a caller lists
+# plays in order, and a report without `played` stamps them all with one
+# value, where the last is the one just started.
+sub _newest {
+	my $entries = shift;
+
+	my $newest;
+	for my $entry ( @{$entries} ) {
+		$newest = $entry if !$newest || $entry->{played} >= $newest->{played};
+	}
+
+	return $newest;
 }
 
 1;

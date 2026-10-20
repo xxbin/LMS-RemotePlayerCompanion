@@ -122,15 +122,16 @@ class Receipt(HistoryTestCase):
                                    "nowplaying_status"},
                          {"accepted", "duplicates", "queued",
                           "nowplaying_status"})
-        self.assertEqual(r.get("nowplaying_status"), "skipped")
+        self.assertIn(r.get("nowplaying_status"),
+                      {"requested", "skipped", "unavailable"})
 
-    def test_nowplaying_alone_is_a_valid_request(self):
+    def test_a_nowplaying_only_request_is_refused(self):
+        """The parameter is gone: now-playing is decided from the plays."""
         track = self.library_track()
 
         r = self.lms.history("living-room", f"nowplaying:{track['id']}")
 
-        self.assertIsNone(code_of(r), f"now-playing-only refused: {r}")
-        self.assertEqual(r.get("accepted"), 0)
+        self.assertEqual(code_of(r), "MISSING_PARAMETER")
 
     def test_a_successful_answer_carries_no_loop(self):
         """A loop item would be per-destination detail the caller ignores."""
