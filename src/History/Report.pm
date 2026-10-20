@@ -154,8 +154,16 @@ sub run {
 	# Marked after the last write, not before: a server that dies mid-entry
 	# should re-apply it on retry rather than forget it. The window is a few
 	# statements wide, and it is the at-least-once boundary.
-	Plugins::RemotePlayerCompanion::History::Store->mark(
-		$playerid, $_->{url}, $_->{played} ) for @new;
+	#
+	# Best-effort: the writes have landed and the caller is about to delete
+	# its copy, so a cache that cannot be written must not turn a successful
+	# report into an error the caller would retry -- and re-apply.
+	eval {
+		Plugins::RemotePlayerCompanion::History::Store->mark(
+			$playerid, $_->{url}, $_->{played} ) for @new;
+		1;
+	} or main::DEBUGLOG && $log->is_debug && $log->debug(
+		'history store: could not mark ' . scalar(@new) . ' entries: ' . $@ );
 
 	# `0 + $accepted` in the interpolation, not `$accepted`: interpolating a
 	# scalar marks it as a string, and these two go straight into the answer
