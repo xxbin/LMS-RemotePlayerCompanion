@@ -36,7 +36,7 @@ plugin's own version, read from `install.xml` — the only place it is written.
 |---|---|---|
 | [`dstm`](#the-dstm-family) | What to play next: a rolling queue filled from Dont Stop The Music providers | implemented |
 | `convert` | What the player can play: the server's transcoding and format support | planned |
-| `history` | What the player has played: listening done offline, reported back to the server | implemented |
+| [`history`](#the-history-family) | What the player has played: listening done offline, reported back to the server | implemented |
 | `favorites` | Favourites: the server's and the player's, kept in step in both directions | planned |
 | `rating` | Track ratings: the server's and the player's, kept in step in both directions | planned |
 
