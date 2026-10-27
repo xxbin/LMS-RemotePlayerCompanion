@@ -23,7 +23,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
-from lmsrpc import LMS, RUN_ID, library_track_with_stats  # noqa: E402
+from lmsrpc import (LMS, RUN_ID, library_track_with_stats,  # noqa: E402
+                    remove_listening_history)
 
 
 def pref_value(result):
@@ -57,6 +58,10 @@ class ClientId(unittest.TestCase):
         if not cls.track:
             raise unittest.SkipTest(
                 "no library track carries a tracks_persistent row")
+
+    @classmethod
+    def tearDownClass(cls):
+        remove_listening_history(cls.lms, f"rpc-client-{RUN_ID}")
 
     def setUp(self):
         self.playerid = f"rpc-client-{RUN_ID}"

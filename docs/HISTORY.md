@@ -15,14 +15,23 @@ One request carries a batch of plays. For every play the plugin updates:
 - **LMS's play count** — `tracks_persistent`, the count the web UI shows;
 - **Alternative Play Count's Play History** — the row APC's own analyser would
   have written;
+- **Listening History** — an entry in that plugin's own database, built with
+  its own `Sources::describe`;
 - **AudioScrobbler** — an item in LMS's own scrobble queue, which LMS then
   submits, retries and chunks exactly as it does for a real player.
 
 ```
    player ──history report──▶ plugin ──▶ LMS play count
                                      ├──▶ APC play history
+                                     ├─▶ Listening History entry
                                      └──▶ AudioScrobbler queue ──▶ Last.fm
 ```
+
+The first three are *targets* under `History/Targets/`: local destinations
+with a batch interface (`new`, `name`, `status`, `apply`), each responsible
+only for its own plugin's rules. AudioScrobbler is not a target because it
+decides a whole-request refusal (the queue cap) before anything is written
+and owns now-playing; `Report.pm` keeps it outside the target loop.
 
 The command is `remoteplayercompanion history report`, registered with
 `needsClient = 0`: the remote player is not an LMS client, so `playerid` is a
@@ -49,7 +58,7 @@ left for the caller to retry.
 | `id` | one of `id`/`url` | Comma-separated LMS track ids |
 | `url` | one of `id`/`url` | Comma-separated track URLs |
 | `played` | no | Comma-separated epoch **seconds**, one per track, same order |
-| `playername` | no | Display name for APC's player list, 1–64 printable characters |
+| `playername` | no | Display name for APC's and Listening History's player lists, 1–64 printable characters |
 
 - One of `id` or `url` must be present; they are mutually exclusive.
 - There is no now-playing parameter. The plugin decides from the play times:
@@ -113,8 +122,9 @@ and so APC has a URL to record.
   `skipped` (the newest play has ended, or its duration is unknown), or
   `unavailable` (the scrobbler would not take the track).
 
-There is no per-track loop and no account field. How each destination fared is
-a debug log line per entry, under the plugin's own log category.
+There is no per-destination field in the answer and no account field. The
+targets apply the batch internally; how each destination fared is a debug log
+line per entry, under the plugin's own log category.
 
 ### Refusals
 
@@ -131,11 +141,12 @@ a debug log line per entry, under the plugin's own log category.
 Errors are results, never request statuses: an error status closes the JSON-RPC
 socket with no body.
 
-Environmental gaps are **not** refusals. No APC plugin, no scrobbling account,
-scrobbling switched off, a library scan in progress, or a track with no
-`tracks_persistent` row are logged and the report is consumed — the caller
-cannot act on them, and keeping its copy would produce the same outcome next
-time.
+Environmental gaps are **not** refusals. No APC plugin, no Listening History
+plugin (or it is disabled), no scrobbling account, scrobbling switched off, a
+library scan in progress, a track with no `tracks_persistent` row, or a play
+Listening History declines (a station, a service track with no duration) are
+logged and the report is consumed — the caller cannot act on them, and keeping
+its copy would produce the same outcome next time.
 
 ## What each destination gets
 
@@ -162,7 +173,46 @@ The player is saved once per request, after the first row that landed, with
 `last_seen` set to now — a six-day-old play reported today still means the
 player was seen today.
 
-### 3. AudioScrobbler
+### 3. Listening History
+
+The plugin keeps its own SQLite store, and its live tracker has no public
+"record this play" seam: `Tracker::_record` needs a live client and
+`playingSong`, stamps the wall clock, and maintains in-memory session state.
+A backfill has its own start times, so the target calls the storage functions
+the tracker itself calls:
+
+```
+Plugins::ListeningHistory::DB::addEntry
+Plugins::ListeningHistory::DB::addToEntry
+```
+
+That is the plugin's own API, not raw SQL and not a second database. The row
+is built with `Plugins::ListeningHistory::Sources::describe`, so its rules are
+the plugin's own:
+
+- a station is skipped (and ends any album session);
+- a service track with no duration is skipped;
+- a Radio Paradise announcement is skipped;
+- consecutive tracks of one album, with no repeat inside the run and the next
+  starting within `session_gap_min` (default 30 minutes) of the previous
+  play's end, become one `album` entry — the first play creates it, later
+  plays are added and promote it.
+
+`player_id` is the remote player's own id and `player_name` is `playername`,
+falling back to that id. `played` is stored as both `started_at` and
+`played_at`; the entry list orders by `played_at`, so a reported play appears
+at the time it started.
+
+Unlike the live tracker, an imported play does **not** trigger a Qobuz
+release-type lookup: that is a network call per entry, and the imported row is
+complete without it. A release type already known from a live fetch is kept.
+
+The target is `unavailable` when Listening History is not installed, not
+enabled, or a storage function is missing; a row the plugin declines is
+`skipped`; a failed write is `error` for that play only. None of those fails
+the report.
+
+### 4. AudioScrobbler
 
 LMS's implementation does the work. The plugin builds the queue item that
 `newsongCallback` would have built and hands the queue back to LMS, which owns
@@ -206,9 +256,10 @@ the candidate is handed to the API. Historical now-playing is never replayed:
 only the newest play of the current request can be announced.
 
 **Order of writes.** Everything that can refuse the request is decided first:
-scrobbler eligibility and the queue cap. Then LMS, then APC, then the scrobble
-queue, then now-playing, and only then is the duplicate store marked. A server
-that dies mid-entry re-applies that entry on retry rather than forgetting it.
+scrobbler eligibility and the queue cap. Then LMS, APC, Listening History, the
+scrobble queue, then now-playing, and only then is the duplicate store marked.
+A server that dies mid-entry re-applies that entry on retry rather than
+forgetting it.
 
 ### Duplicates
 
@@ -256,5 +307,10 @@ logged as unavailable.
 - **Reporting real plays to a server with an account configured scrobbles
   them.** That is the feature, but it means a test run against such a server
   submits to that Last.fm profile.
+- **Listening History gains entries under the remote player's id**, in its own
+  SQLite store. A track play is one entry; consecutive same-album plays are
+  one album entry. Both are visible in the plugin's own app and can be removed
+  there with More → Remove. The plugin's retention setting applies to them
+  like any other entry.
 - **The play count cannot be undone through the plugin.** It can be edited in
   LMS's database, or reset from the track's information page.

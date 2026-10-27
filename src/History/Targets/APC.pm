@@ -1,4 +1,4 @@
-package Plugins::RemotePlayerCompanion::History::APC;
+package Plugins::RemotePlayerCompanion::History::Targets::APC;
 
 # Alternative Play Count's Play History -- the table that explicitly accepts
 # entries its analyser did not produce.
@@ -8,6 +8,9 @@ package Plugins::RemotePlayerCompanion::History::APC;
 # rating. A play imported after the fact has no skip history, and a rating
 # imported with a present-day value would be a rating given *after* the
 # listen. Only the row.
+#
+# A target: new($ctx), name, status, apply(\@plays). The batch interface is
+# described in History::Targets.
 
 use strict;
 use warnings;
@@ -15,8 +18,8 @@ use warnings;
 use Slim::Utils::Log;
 use Slim::Utils::Prefs;
 
-my $log    = logger('plugin.remoteplayercompanion');
-my $prefs  = preferences('plugin.alternativeplaycount');
+my $log   = logger('plugin.remoteplayercompanion');
+my $prefs = preferences('plugin.alternativeplaycount');
 
 # Probed, not assumed: APC is optional. A server without it gets a logged
 # `unavailable`, not a failed report.
@@ -40,8 +43,62 @@ sub enabled {
 	return $enabled ? 1 : 0;
 }
 
+sub new {
+	my ( $class, $ctx ) = @_;
+
+	my $self = bless { ctx => $ctx }, $class;
+
+	$self->{status} =
+		  !$class->available ? 'unavailable'
+		: !$class->enabled   ? 'disabled'
+		:                      'ok';
+
+	return $self;
+}
+
+sub name { return 'apc' }
+
+sub status { return $_[0]->{status} }
+
 sub apply {
-	my ( $class, $entry, $playerid ) = @_;
+	my ( $self, $entries ) = @_;
+
+	my @results;
+	my $saved = 0;
+
+	for my $entry ( @{$entries} ) {
+		my $status = eval { $self->_record( $entry, $self->{ctx}{playerid} ) };
+
+		if ( !$status ) {
+			my $error = $@ || 'unknown error';
+			$log->error("history apc: addPlayEntry failed: $error");
+			push @results, { status => 'error', detail => $error };
+			next;
+		}
+
+		if ( $status eq 'ok' ) {
+			push @results, { status => 'ok', detail => '' };
+
+			# The player is recorded once per request, after the first row
+			# that landed -- not once per track.
+			if ( !$saved ) {
+				$self->savePlayer( $self->{ctx}{playerid},
+					$self->{ctx}{playername} );
+				$saved = 1;
+			}
+		}
+		else {
+			push @results, { status => 'skipped', detail => $status };
+		}
+	}
+
+	return \@results;
+}
+
+sub _record {
+	my ( $self, $entry, $playerid ) = @_;
+
+	my $class = ref $self;
 
 	return 'unavailable' unless $class->available;
 	return 'disabled'    unless $class->enabled;
@@ -68,10 +125,7 @@ sub apply {
 		);
 	};
 
-	if ($@) {
-		$log->error("history apc: addPlayEntry failed: $@");
-		return 'error';
-	}
+	die $@ if $@;
 
 	# addPlayEntry answers undef when its database is not initialized.
 	return 'disabled' unless $ok;

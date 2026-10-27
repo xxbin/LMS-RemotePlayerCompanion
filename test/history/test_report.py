@@ -13,7 +13,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
-from lmsrpc import LMS, library_track_with_stats  # noqa: E402
+from lmsrpc import (LMS, RUN_ID, library_track_with_stats,  # noqa: E402
+                    remove_listening_history)
 
 
 def code_of(result):
@@ -111,13 +112,22 @@ class Refusals(HistoryTestCase):
 class Receipt(HistoryTestCase):
     """What a request the plugin accepts answers with."""
 
+    #: A player of this run's own: an accepted report is recorded, and a
+    #: fixed id such as the documentation's "living-room" would write into
+    #: whatever real player happens to use it.
+    playerid = f"rpc-receipt-{RUN_ID}"
+
+    @classmethod
+    def tearDownClass(cls):
+        remove_listening_history(cls.lms, cls.playerid)
+
     def test_a_normal_report_answers_with_the_receipt(self):
         track = self.library_track()
 
-        r = self.lms.history("living-room", f"id:{track['id']}")
+        r = self.lms.history(self.playerid, f"id:{track['id']}")
 
         self.assertIsNone(code_of(r), f"report refused: {r}")
-        self.assertEqual(r.get("playerid"), "living-room")
+        self.assertEqual(r.get("playerid"), self.playerid)
         self.assertEqual(set(r) & {"accepted", "duplicates", "queued",
                                    "nowplaying_status"},
                          {"accepted", "duplicates", "queued",
@@ -129,7 +139,7 @@ class Receipt(HistoryTestCase):
         """The parameter is gone: now-playing is decided from the plays."""
         track = self.library_track()
 
-        r = self.lms.history("living-room", f"nowplaying:{track['id']}")
+        r = self.lms.history(self.playerid, f"nowplaying:{track['id']}")
 
         self.assertEqual(code_of(r), "MISSING_PARAMETER")
 
@@ -137,7 +147,7 @@ class Receipt(HistoryTestCase):
         """A loop item would be per-destination detail the caller ignores."""
         track = self.library_track()
 
-        r = self.lms.history("living-room", f"id:{track['id']}")
+        r = self.lms.history(self.playerid, f"id:{track['id']}")
 
         for key in r:
             if key.endswith("_loop"):

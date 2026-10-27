@@ -264,6 +264,84 @@ def require_player(lms):
     return found[0]
 
 
+def _item_text(item):
+    """Every human-readable field an OPML item may carry."""
+    parts = [item.get(k, "") for k in ("text", "name", "line1", "line2")]
+    return " ".join(p for p in parts if isinstance(p, str))
+
+
+def _go_params(item):
+    return ((item.get("actions") or {}).get("go") or {}).get("params") or {}
+
+
+def remove_listening_history(lms, playerid, playername=None):
+    """Remove the Listening History entries this run wrote for a remote player.
+
+    A report writes through Listening History's own storage, and the receipt
+    deliberately carries no per-destination detail, so the ids are not known
+    to the caller. They are found the way a user finds them: in the plugin's
+    By player feed. Removal uses the plugin's own `listeninghistory remove`.
+
+    The player row is matched exactly (`name (n)`), not by prefix: the ids a
+    suite uses share one (`rpc-dup` and `rpc-dup-a`), and removing the other
+    test's row would hide the very duplicate it is there to catch.
+
+    Returns the number of entries removed. Zero when Listening History is not
+    installed or does not answer -- there is then nothing of ours in it.
+    """
+    name = playername or playerid
+    client = PLAYER or (lms.players() or [""])[0]
+    if not client:
+        return 0
+
+    top = lms.call(["listeninghistory", "items", 0, 200, "menu:1"],
+                   client=client)
+    if top.get("_error") or top.get("error"):
+        return 0
+
+    by_player = None
+    for item in top.get("item_loop") or []:
+        if ("By player" in _item_text(item)
+                or "speaker" in (item.get("icon") or "")):
+            by_player = _go_params(item).get("item_id")
+            break
+    if by_player is None:
+        return 0
+
+    rows = lms.call(["listeninghistory", "items", 0, 200, "menu:1",
+                     f"item_id:{by_player}"], client=client)
+    if rows.get("_error") or rows.get("error"):
+        return 0
+
+    row = next((r for r in rows.get("item_loop") or []
+                if _item_text(r).startswith(f"{name} (")), None)
+    if row is None:
+        return 0
+
+    entry_item = _go_params(row).get("item_id")
+    if entry_item is None:
+        return 0
+
+    listed = lms.call(["listeninghistory", "items", 0, 200, "menu:1",
+                       f"item_id:{entry_item}"], client=client)
+    if listed.get("_error") or listed.get("error"):
+        return 0
+
+    removed = 0
+    for item in listed.get("item_loop") or []:
+        # A history entry is playable; the sort row above it is a link.
+        if item.get("type") not in ("audio", "playlist"):
+            continue
+        entry_id = (((item.get("actions") or {}).get("more") or {})
+                    .get("params") or {}).get("id")
+        if entry_id is None:
+            continue
+        r = lms.call(["listeninghistory", "remove", f"id:{entry_id}"])
+        if not r.get("_error") and not r.get("error"):
+            removed += 1
+    return removed
+
+
 class DSTMTestCase(unittest.TestCase):
     """One LMS, and a queue name of its own per test class.
 

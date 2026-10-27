@@ -12,10 +12,9 @@ use warnings;
 
 use Slim::Utils::Log;
 
-use Plugins::RemotePlayerCompanion::History::APC;
 use Plugins::RemotePlayerCompanion::History::Scrobbler;
-use Plugins::RemotePlayerCompanion::History::Stats;
 use Plugins::RemotePlayerCompanion::History::Store;
+use Plugins::RemotePlayerCompanion::History::Targets;
 use Plugins::RemotePlayerCompanion::DSTM::Tracks;
 
 my $log = logger('plugin.remoteplayercompanion');
@@ -91,51 +90,51 @@ sub run {
 	}
 
 	# Local writes first: they are the durable record and cannot fail
-	# asynchronously. Any destination throwing is caught per entry, so one
-	# broken one does not stop the others or leave the request unanswered.
-	for my $entry ( @new ) {
-		my $result = eval {
-			Plugins::RemotePlayerCompanion::History::Stats->apply($entry);
-		};
-		$result ||= { status => 'error', error => ( $@ || 'unknown error' ) };
+	# asynchronously. Each target owns its destination's rules and answers
+	# with one status per play; one broken destination is logged and the
+	# others still run, so it cannot stop the report or leave it unanswered.
+	my $targets = Plugins::RemotePlayerCompanion::History::Targets->for_context(
+		{
+			playerid   => $playerid,
+			playername => $args->{playername},
+			now        => $args->{now},
+		}
+	);
 
-		main::DEBUGLOG && $log->is_debug && $log->debug(
-			'history lms: ' . $playerid . ' ' . $entry->{url}
-			. ' status=' . $result->{status}
-			. (
-				$result->{status} eq 'ok'
-				? ' playcount=' . ( 0 + $result->{playcount} )
-					. ' lastplayed=' . ( 0 + $result->{lastplayed} )
-				: ' error=' . ( $result->{error} || '' )
-			)
-		);
-	}
+	for my $target ( @{$targets} ) {
+		my $name = $target->name;
 
-	my $apc_saved = 0;
+		if ( $target->status ne 'ok' ) {
+			main::DEBUGLOG && $log->is_debug && $log->debug(
+				'history ' . $name . ': ' . $playerid
+				. ' status=' . $target->status );
+			next;
+		}
 
-	for my $entry ( @new ) {
-		my $status;
-		my $apc_error;
-		eval {
-			$status = Plugins::RemotePlayerCompanion::History::APC->apply(
-				$entry, $playerid );
-			1;
-		} or $apc_error = $@ || 'unknown error';
+		my $results = eval { $target->apply( \@new ) };
 
-		$status ||= 'error';
+		if ( !$results || ref $results ne 'ARRAY' ) {
+			my $error = $@ || 'no results';
+			$error =~ s/\s+at\s+\S+\s+line\s+\d+\.?\s*$//;
+			$log->error(
+				'history ' . $name . ': ' . $playerid
+				. ' failed: ' . $error );
+			next;
+		}
 
-		main::DEBUGLOG && $log->is_debug && $log->debug(
-			'history apc: ' . $playerid . ' ' . $entry->{url}
-			. ' status=' . $status
-			. ( $apc_error ? ' error=' . $apc_error : '' )
-		);
+		for my $i ( 0 .. $#new ) {
+			my $result = $results->[$i]
+				|| { status => 'error', detail => 'no result' };
 
-		# The player is recorded once per request, after the first row that
-		# landed -- not once per track.
-		if ( $status eq 'ok' && !$apc_saved ) {
-			Plugins::RemotePlayerCompanion::History::APC->savePlayer(
-				$playerid, $args->{playername} );
-			$apc_saved = 1;
+			main::DEBUGLOG && $log->is_debug && $log->debug(
+				'history ' . $name . ': ' . $playerid . ' ' . $new[$i]{url}
+				. ' status=' . $result->{status}
+				. (
+					defined $result->{detail} && length $result->{detail}
+					? ' detail=' . $result->{detail}
+					: ''
+				)
+			);
 		}
 	}
 

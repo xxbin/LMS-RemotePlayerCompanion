@@ -19,7 +19,7 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
-from lmsrpc import LMS, RUN_ID  # noqa: E402
+from lmsrpc import (LMS, RUN_ID, remove_listening_history)  # noqa: E402
 
 #: Set to "1" to let the tests that need an account actually submit to it.
 SCROBBLE = os.environ.get("LMS_HISTORY_SCROBBLE") == "1"
@@ -94,6 +94,9 @@ class NowPlaying(unittest.TestCase):
         self.playerid = f"rpc-now-{RUN_ID}-{tag}"
         self.now = int(time.time())
         self.duration = int(float(self.track.get("duration") or 0))
+
+    def tearDown(self):
+        remove_listening_history(self.lms, self.playerid)
 
     def report(self, *params):
         r = self.lms.history(self.playerid, *params)

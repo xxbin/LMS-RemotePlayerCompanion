@@ -11,3 +11,6 @@ docs/superpowers/
 # Design notes that are not part of the plugin and are not ready to be
 # published: read locally, not shipped.
 docs/proxy.md
+
+# A local code index, rebuilt from the working tree, not part of the plugin.
+.codegraph/

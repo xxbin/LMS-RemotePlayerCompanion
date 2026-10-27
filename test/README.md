@@ -58,6 +58,7 @@ test/history/
 ├── test_report.py      the request contract: refusals, and the receipt
 ├── test_duplicates.py  one report twice is one play
 ├── test_targets.py     where a play lands: the play count, then APC
+├── test_listeninghistory.py  the entry Listening History itself lists
 └── test_nowplaying.py  the AudioScrobbler queue and now-playing
 ```
 
@@ -114,6 +115,11 @@ A report is a real write, and most of it cannot be undone from the plugin:
   track's information page in LMS's web UI.
 - **APC rows are written** under the run's own remote player id, so they can be
   removed from APC's play history view.
+- **Listening History rows are written** by every suite that reports a play,
+  under a run-specific player name and id. Each suite removes the entries it
+  created in teardown, found through the plugin's By player feed and removed
+  with the plugin's own `listeninghistory remove`. A run killed outright leaves
+  them behind, and they can be removed in the plugin's app with More → Remove.
 - **A server with an AudioScrobbler account configured scrobbles them.** That
   is the feature being tested, not a leak. The tests that also announce a
   now-playing track run only under `LMS_HISTORY_SCROBBLE=1` so that a run says
@@ -135,6 +141,7 @@ it.
 | Suite | Also needs |
 |---|---|
 | `test_async_delivery`, `test_fill_timeout`, `test_concurrent_take` | one asynchronous provider, looked up from `lmsrpc.ASYNC_CANDIDATES` |
+| `test_listeninghistory` | the Listening History plugin installed, enabled, and answering its own `By player` feed |
 
 Those three ask for the property they need and **skip with a reason** when no
 provider has it. A skip means **nothing was concluded**, not that something

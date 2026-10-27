@@ -17,7 +17,8 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
-from lmsrpc import LMS, RUN_ID, library_track_with_stats  # noqa: E402
+from lmsrpc import (LMS, RUN_ID, library_track_with_stats,  # noqa: E402
+                    remove_listening_history)
 
 
 def code_of(result):
@@ -39,6 +40,14 @@ class Duplicates(unittest.TestCase):
         if not cls.track:
             raise unittest.SkipTest(
                 "no library track carries a tracks_persistent row")
+
+    @classmethod
+    def tearDownClass(cls):
+        # Every id the class reports under, whether or not its test ran: a
+        # skipped or failed test must not leave a row in a real history.
+        for playerid in (f"rpc-dup-{RUN_ID}", f"rpc-dup-in-{RUN_ID}",
+                         f"rpc-dup-a-{RUN_ID}", f"rpc-dup-b-{RUN_ID}"):
+            remove_listening_history(cls.lms, playerid)
 
     def setUp(self):
         # A player and a play time of this run's own: the duplicate store

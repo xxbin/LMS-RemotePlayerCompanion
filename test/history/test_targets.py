@@ -15,7 +15,7 @@ import zlib
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "lib"))
 from lmsrpc import (LMS, RUN_ID, library_track_with_stats,  # noqa: E402
-                    require_player)
+                    remove_listening_history, require_player)
 
 
 def code_of(result):
@@ -45,6 +45,10 @@ class Targets(unittest.TestCase):
         if not cls.track:
             raise unittest.SkipTest(
                 "no library track carries a tracks_persistent row")
+
+    @classmethod
+    def tearDownClass(cls):
+        remove_listening_history(cls.lms, f"rpc-target-{RUN_ID}")
 
     def setUp(self):
         self.playerid = f"rpc-target-{RUN_ID}"
