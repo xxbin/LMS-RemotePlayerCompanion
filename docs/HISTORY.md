@@ -27,6 +27,9 @@ One request carries a batch of plays. For every play the plugin updates:
                                      └──▶ AudioScrobbler queue ──▶ Last.fm
 ```
 
+What Was That Tune is deliberately not among them; see
+[Not a destination](#not-a-destination-what-was-that-tune).
+
 The first three are *targets* under `History/Targets/`: local destinations
 with a batch interface (`new`, `name`, `status`, `apply`), each responsible
 only for its own plugin's rules. AudioScrobbler is not a target because it
@@ -270,6 +273,28 @@ retried after a timeout can safely delete its copy.
 
 A report without `played` is never recognised as a duplicate, because `now`
 differs on every call: send `played` if the caller may retry.
+
+## Not a destination: What Was That Tune
+
+PlayHistory (Michael Herger's plugin) is not a destination. Its history is
+addressed per player, and a remote player is not a player LMS knows.
+
+**The entries cannot be read.** The plugin's pages are opened for a player, and
+LMS resolves that player id against the clients it knows — JSON-RPC's
+`params[0]`, the web UI's `player=`. A remote player is not one of them: the
+synthetic client exists only while a report runs and is in no player list. Its
+entries would at most appear as a row in the plugin's player menu, which is
+built from the history itself, and that row cannot be opened — the entries
+behind it are unreachable in the app and in the web UI.
+
+**The write is hard to implement as well.** There is no "record this play"
+interface: the plugin logs a play by reading the URL from the *playing*
+client's playlist, so writing means fabricating client state. What it writes
+is stamped with the logging time rather than the play time, so a backlog loses
+its order; an entry identical to that player's newest one is dropped; the
+ignore-keyword list applies; and the buffer is an in-memory object that
+rewrites its own preference on every play, so a preference written directly is
+overwritten by the next live play. Nothing written can be deleted afterwards.
 
 ## The synthetic client
 
