@@ -20,6 +20,7 @@ use URI::Escape qw(uri_escape_utf8);
 
 use Slim::Player::ProtocolHandlers;
 use Slim::Utils::Log;
+use Slim::Utils::PluginManager;
 use Slim::Utils::Prefs;
 
 use Plugins::RemotePlayerCompanion::History::VClient;
@@ -35,14 +36,20 @@ use constant MIN_DURATION => 30;
 # harder to clear.
 use constant MAX_PENDING => 1000;
 
-# Probed, not assumed: on a server without it the report still succeeds and
-# every entry logs `unsupported`.
+# Probed, not assumed: on a server without it -- or with it switched off --
+# the report still succeeds and every entry logs `unsupported`. `require`
+# alone is not enough: the module is on @INC even when LMS did not load the
+# plugin, and the stored preferences still say scrobbling is on, so calling
+# into it would submit where the user expects nothing to be submitted.
 my $available;
 
 sub available {
 	return $available if defined $available;
 
-	$available = eval { require Slim::Plugin::AudioScrobbler::Plugin; 1 } ? 1 : 0;
+	$available =
+		   eval { Slim::Utils::PluginManager->isEnabled('Slim::Plugin::AudioScrobbler::Plugin') }
+		&& eval { require Slim::Plugin::AudioScrobbler::Plugin; 1 }
+		? 1 : 0;
 
 	return $available;
 }

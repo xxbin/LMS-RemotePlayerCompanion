@@ -37,6 +37,7 @@ use Plugins::RemotePlayerCompanion::DSTM::Tracks;
 use Plugins::RemotePlayerCompanion::DSTM::VClient;
 use Slim::Utils::Cache;
 use Slim::Utils::Log;
+use Slim::Utils::PluginManager;
 
 my $log   = logger('plugin.remoteplayercompanion');
 my $cache = Slim::Utils::Cache->new();
@@ -207,6 +208,14 @@ sub _mixer {
 	return $mixerModule if defined $mixerModule;
 
 	$mixerModule = '';
+
+	# Installed is not enabled: LMS puts every installed plugin on @INC, so
+	# the require below would succeed for a RandomPlay that was switched off,
+	# and its mixer would be called anyway.
+	if ( !eval { Slim::Utils::PluginManager->isEnabled('Slim::Plugin::RandomPlay::Plugin') } ) {
+		$log->error('RandomPlay is disabled; cannot expand randomplay:// recipes');
+		return $mixerModule;
+	}
 
 	if ( eval { require Slim::Plugin::RandomPlay::Plugin; require Slim::Plugin::RandomPlay::Mixer; 1 } ) {
 		$mixerModule = 'Slim::Plugin::RandomPlay::Mixer';

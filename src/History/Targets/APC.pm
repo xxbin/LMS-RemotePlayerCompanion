@@ -16,19 +16,25 @@ use strict;
 use warnings;
 
 use Slim::Utils::Log;
+use Slim::Utils::PluginManager;
 use Slim::Utils::Prefs;
 
 my $log   = logger('plugin.remoteplayercompanion');
 my $prefs = preferences('plugin.alternativeplaycount');
 
-# Probed, not assumed: APC is optional. A server without it gets a logged
-# `unavailable`, not a failed report.
+# Probed, not assumed: APC is optional. A server without it -- or with it
+# installed but switched off -- gets a logged `unavailable`, not a failed
+# report. `require` alone would say yes to a disabled plugin: every installed
+# plugin is on @INC whether LMS loaded it or not.
 my $available;
 
 sub available {
 	return $available if defined $available;
 
-	$available = eval { require Plugins::AlternativePlayCount::Storage; 1 } ? 1 : 0;
+	$available =
+		   eval { Slim::Utils::PluginManager->isEnabled('Plugins::AlternativePlayCount::Plugin') }
+		&& eval { require Plugins::AlternativePlayCount::Storage; 1 }
+		? 1 : 0;
 
 	return $available;
 }
