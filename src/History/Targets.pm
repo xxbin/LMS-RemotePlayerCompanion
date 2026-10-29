@@ -6,7 +6,7 @@ package Plugins::RemotePlayerCompanion::History::Targets;
 #
 #   new($ctx)        one per request; $ctx carries playerid, playername, now
 #   name()           the word in the debug line: lms, apc, listeninghistory
-#   status()         'ok', 'unavailable' or 'disabled'
+#   status()         'ok' or 'unavailable'
 #   apply(\@plays)    \@results, one per play, in the same order:
 #                    { status => 'ok'|'skipped'|'error', detail => '...' }
 #

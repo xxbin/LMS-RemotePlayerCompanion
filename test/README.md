@@ -113,6 +113,9 @@ A report is a real write, and most of it cannot be undone from the plugin:
 - **A reported play increments a real library track's play count.** The suite
   prints the count before and after each such test. It can be reset from the
   track's information page in LMS's web UI.
+- **APC's count and `lastPlayed` for that track change too**, and its dynamic
+  played/skipped value rises with every reported play. The APC values can be
+  reset from the track's information page as well.
 - **APC rows are written** under the run's own remote player id, so they can be
   removed from APC's play history view.
 - **Listening History rows are written** by every suite that reports a play,

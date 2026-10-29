@@ -90,8 +90,8 @@ answers with, the errors it raises, and why the queue is built the way it is
 
 Listening a remote player did while it was away from the server, reported back
 in a batch and recorded where the server already keeps history: LMS's play
-count, Alternative Play Count's Play History, Listening History's own store,
-and the AudioScrobbler account configured on the server.
+count, Alternative Play Count's count and Play History, Listening History's
+own store, and the AudioScrobbler account configured on the server.
 
 ```
 ["", ["remoteplayercompanion", "history", "report",
@@ -155,7 +155,7 @@ LMS's plugin directories:
 │   ├── Targets.pm     the local destinations, and their batch interface
 │   ├── Targets/       one file per destination
 │   │   ├── Stats.pm   LMS's play count and lastplayed
-│   │   ├── APC.pm     Alternative Play Count's play history
+│   │   ├── APC.pm     Alternative Play Count's count and play history
 │   │   └── ListeningHistory.pm  Listening History's entries and plays
 │   ├── Scrobbler.pm   AudioScrobbler's queue and now-playing
 │   ├── Store.pm       the duplicate key
