@@ -2,29 +2,29 @@
 
 Detail for the `history` family of [Remote Player Companion](../README.md):
 a batch of plays a remote player made away from the server, reported back and
-recorded in the places the server already keeps listening history.
+written into the server's existing play records and scrobble queue.
 
 It is written for whoever works on this next: the contract first, then what
-each destination gets, then the mechanics and the side effects worth knowing
-about before running it against a server you care about.
+each destination gets, then the mechanics and side effects.
 
 ## What it is
 
-One request carries a batch of plays. For every play the plugin updates:
+One request carries a batch of plays. For every play it has not seen before,
+the plugin updates:
 
 - **LMS's play count** — `tracks_persistent`, the count the web UI shows;
-- **Alternative Play Count's Play History** — the row APC's own analyser would
-  have written;
+- **Alternative Play Count's Play History** — an entry in APC's own Play
+  History table;
 - **Listening History** — an entry in that plugin's own database, built with
   its own `Sources::describe`;
 - **AudioScrobbler** — an item in LMS's own scrobble queue, which LMS then
   submits, retries and chunks exactly as it does for a real player.
 
 ```
-   player ──history report──▶ plugin ──▶ LMS play count
-                                     ├──▶ APC play history
-                                     ├─▶ Listening History entry
-                                     └──▶ AudioScrobbler queue ──▶ Last.fm
+   player ──history report──▶ Remote Player Companion ──▶ LMS play count
+                                                        ├──▶ APC play history
+                                                        ├──▶ Listening History entry
+                                                        └──▶ AudioScrobbler queue ──▶ Last.fm
 ```
 
 What Was That Tune is deliberately not among them; see
@@ -33,18 +33,17 @@ What Was That Tune is deliberately not among them; see
 The first three are *targets* under `History/Targets/`: local destinations
 with a batch interface (`new`, `name`, `status`, `apply`), each responsible
 only for its own plugin's rules. AudioScrobbler is not a target because it
-decides a whole-request refusal (the queue cap) before anything is written
-and owns now-playing; `Report.pm` keeps it outside the target loop.
+can refuse the whole request (the queue cap) before anything is written, and
+it owns now-playing; `Report.pm` keeps it outside the target loop.
 
 The command is `remoteplayercompanion history report`, registered with
-`needsClient = 0`: the remote player is not an LMS client, so `playerid` is a
-parameter and `params[0]` stays empty, as in the `dstm` family.
+`needsClient = 0`: the remote player does not connect as an LMS client, so
+`playerid` is a parameter and `params[0]` stays empty, as in the `dstm` family.
 
-**Success transfers ownership.** A successful answer means the plugin has taken
-the plays over, and the caller deletes its copy. That is why every request the
-plugin cannot record in full is refused *before anything is written*, and why
-the answer is a receipt rather than a per-destination report — there is nothing
-left for the caller to retry.
+**Success transfers ownership.** The caller deletes its copy once the plugin
+accepts the plays, so a request that cannot be recorded in full is refused
+before anything is written. The answer is a receipt, not a per-destination
+report.
 
 ## The request
 
@@ -65,7 +64,7 @@ left for the caller to retry.
 
 - One of `id` or `url` must be present; they are mutually exclusive.
 - There is no now-playing parameter. The plugin decides from the play times:
-  see [Now-playing](#now-playing).
+  see [AudioScrobbler](#4-audioscrobbler).
 - At most **500** entries per request.
 - An empty item, a trailing comma or an empty list is refused rather than
   trimmed: a malformed element means the positional match with `played` may be
@@ -92,15 +91,15 @@ left for the caller to retry.
 ### Resolving an entry
 
 ```
-id:   DSTM::Tracks->urlForId($id)          undef or '' -> UNRESOLVED_TRACK
-url:  Slim::Schema->objectForUrl({url})
+id:   DSTM::Tracks->urlForId($id)    undef or '' -> UNRESOLVED_TRACK
+both: Slim::Schema->objectForUrl({url})
       undef and a remote URL -> Slim::Schema::RemoteTrack->new($url)
       otherwise              -> UNRESOLVED_TRACK
 ```
 
 An ephemeral `RemoteTrack` is never inserted into the library. It exists so
 AudioScrobbler can ask the protocol handler for artist, title and duration,
-and so APC has a URL to record.
+and so the local destinations can record its URL.
 
 ## The answer
 
@@ -114,20 +113,23 @@ and so APC has a URL to record.
 }
 ```
 
-- `accepted` — entries the plugin took ownership of, equal to the number sent
-  on a successful request.
+- `accepted` — entries that were not duplicates. This can be less than the
+  number sent, and a destination may still skip one (a station, no play-count
+  row, and so on); the play is consumed either way.
 - `duplicates` — entries already recorded from an earlier report, not applied
   again. They are consumed, not refused.
-- `queued` — entries handed to the AudioScrobbler queue. Eligibility can reduce
-  it (`too_short`, `ignored`, radio), and it is 0 when scrobbling is off, no
-  account is configured, or the plugin is missing.
+- `queued` — entries handed to the AudioScrobbler queue. Eligibility can
+  reduce it (`too_short`, `ignored`, radio), and it is 0 when scrobbling is
+  off, no account is configured, the plugin is missing or disabled, or LMS
+  would not take the queue.
 - `nowplaying_status` — `requested` (handed to the AudioScrobbler API),
-  `skipped` (the newest play has ended, or its duration is unknown), or
-  `unavailable` (the scrobbler would not take the track).
+  `skipped` (there was no new play to announce, the newest play has ended, or
+  its duration is unknown), or `unavailable` (the scrobbler is unavailable or
+  would not take the track).
 
-There is no per-destination field in the answer and no account field. The
-targets apply the batch internally; how each destination fared is a debug log
-line per entry, under the plugin's own log category.
+The answer has no per-destination field and no account field. The targets
+apply the batch internally; `Report.pm` logs one debug line per entry and
+target, under the plugin's own log category.
 
 ### Refusals
 
@@ -140,129 +142,96 @@ line per entry, under the plugin's own log category.
 | `INVALID_PLAYED` | a `played` value is not an integer, or lies outside the window |
 | `UNRESOLVED_TRACK` | an id or URL resolves to nothing (the message names the index and the input) |
 | `SCROBBLE_QUEUE_FULL` | enqueueing would leave more than 1000 pending scrobbles |
+| `INTERNAL_ERROR` | the report died before answering; the message carries the error |
 
 Errors are results, never request statuses: an error status closes the JSON-RPC
 socket with no body.
 
-Environmental gaps are **not** refusals. No APC plugin, no Listening History
-plugin (or it is disabled), no scrobbling account, scrobbling switched off, a
-library scan in progress, a track with no `tracks_persistent` row, or a play
-Listening History declines (a station, a service track with no duration) are
-logged and the report is consumed — the caller cannot act on them, and keeping
-its copy would produce the same outcome next time.
+Environmental gaps are **not** refusals. A missing or disabled APC, Listening
+History or AudioScrobbler plugin, APC's Play History switched off, statistics
+switched off, no scrobbling account, scrobbling switched off, a library scan
+in progress, a track with no `tracks_persistent` row, or a play that
+Listening History declines (a station, a service track with no duration) is
+logged and the report is consumed. The caller cannot act on
+these, and keeping its copy would produce the same outcome next time.
 
 ## What each destination gets
 
 ### 1. LMS's play count
 
 The rules are `Slim::Player::Song`'s own: increment only when LMS statistics
-are on, no scan is running, a `tracks_persistent` row exists, and the play is a
-new listen rather than a seek. `lastplayed` becomes `max(existing, played)` and
-is never lowered, so an out-of-order report counts the play without moving the
-clock backwards.
+are on, no scan is running, and a `tracks_persistent` row exists. (`Song` also
+skips a seek; a reported play is not one.) `lastplayed` becomes
+`max(existing, played)` and is never lowered, so an out-of-order report counts
+the play without moving the clock backwards.
 
 ### 2. APC's Play History
 
-`AlternativePlayCount::Storage->addPlayEntry`, with the URL, its md5, the
-track's MusicBrainz id, the reported play time, `remote`, and the remote
-player's id as `client_id`.
+Each play becomes one Play History row, written with
+`AlternativePlayCount::Storage->addPlayEntry`: the URL, its md5, the
+MusicBrainz id, the play time, `remote`, and the remote player's id as
+`client_id`. That is the call APC's own analyser makes, except that `rating`
+is left empty and `played` is the reported start rather than the instant
+APC's own threshold fired.
 
-Nothing else in APC is touched: not its counts table (tied to APC's own
-threshold and skip handling), not its dynamic played/skipped values, not auto
-rating. An imported play has no skip history, and a rating imported with a
-present-day value would be a rating given *after* the listen.
-
-The player is saved once per request, after the first row that landed, with
-`last_seen` set to now — a six-day-old play reported today still means the
-player was seen today.
+- **APC's counts are not touched.** They are tied to APC's own threshold and
+  skip handling, and an imported play has no skip history to rate.
+- **Nothing else changes either**: no dynamic played/skipped values, no auto
+  rating — a rating stamped today would be a rating given *after* the listen.
+- **The player row** is saved once per request, after the first row lands:
+  name from `playername`, else the name APC already has, else the id; model
+  `remote`; `last_seen` set to now — a six-day-old play reported today still
+  means the player was seen today.
 
 ### 3. Listening History
 
-The plugin keeps its own SQLite store, and its live tracker has no public
-"record this play" seam: `Tracker::_record` needs a live client and
-`playingSong`, stamps the wall clock, and maintains in-memory session state.
-A backfill has its own start times, so the target calls the storage functions
-the tracker itself calls:
-
-```
-Plugins::ListeningHistory::DB::addEntry
-Plugins::ListeningHistory::DB::addToEntry
-```
-
-That is the plugin's own API, not raw SQL and not a second database. The row
-is built with `Plugins::ListeningHistory::Sources::describe`, so its rules are
-the plugin's own:
+The plugin's live tracker has no public "record this play" seam:
+`Tracker::_record` needs a live client and `playingSong`, stamps the wall
+clock, and keeps in-memory session state. A backfill has its own start times,
+so the target calls the storage functions the tracker itself uses —
+`Plugins::ListeningHistory::DB::addEntry` and `addToEntry`, the plugin's own
+API rather than raw SQL or a second database — and builds the row with
+`Plugins::ListeningHistory::Sources::describe`. That keeps the plugin's rules:
 
 - a station is skipped (and ends any album session);
-- a service track with no duration is skipped;
-- a Radio Paradise announcement is skipped;
-- consecutive tracks of one album, with no repeat inside the run and the next
-  starting within `session_gap_min` (default 30 minutes) of the previous
-  play's end, become one `album` entry — the first play creates it, later
-  plays are added and promote it.
-
-`player_id` is the remote player's own id and `player_name` is `playername`,
-falling back to that id. `played` is stored as both `started_at` and
-`played_at`; the entry list orders by `played_at`, so a reported play appears
-at the time it started.
-
-Unlike the live tracker, an imported play does **not** trigger a Qobuz
-release-type lookup: that is a network call per entry, and the imported row is
-complete without it. A release type already known from a live fetch is kept.
-
-The target is `unavailable` when Listening History is not installed, not
-enabled, or a storage function is missing; a row the plugin declines is
-`skipped`; a failed write is `error` for that play only. None of those fails
-the report.
+- a service track with no duration, or a Radio Paradise announcement, is
+  skipped;
+- consecutive tracks from one album become one `album` entry when nothing
+  repeats in the run and the next play starts within `session_gap_min`
+  (default 30 minutes) of the previous play's end.
 
 ### 4. AudioScrobbler
 
-LMS's implementation does the work. The plugin builds the queue item that
-`newsongCallback` would have built and hands the queue back to LMS, which owns
-the handshake, the retries, the 50-item chunking and the durable queue.
-Nothing in this plugin posts to Last.fm.
+A report does two things here: every play LMS would scrobble is queued, and
+the newest play still running is announced as now-playing. Submitting is
+LMS's — the plugin builds the queue item `newsongCallback` would have built
+and hands the queue back, so the handshake, the retries and the durable queue
+stay LMS's.
 
-**Eligibility**, in LMS's order: scrobbling enabled, an account configured,
-metadata, at least 30 seconds, the ignore lists (`ignoreTitles`,
-`ignoreArtists`, `ignoreAlbums`, `ignoreGenres`; case-insensitive substrings),
-and radio only when `include_radio` allows it. A track that fails any of them
-is logged with the reason and is not queued; the report still succeeds.
+- **Eligibility** is LMS's own, in its order: scrobbling on, an account,
+  metadata, at least 30 seconds when the duration is known, the ignore lists
+  (`ignoreTitles`, `ignoreArtists`, `ignoreAlbums`, `ignoreGenres`;
+  case-insensitive substrings), and radio only when `include_radio` allows
+  it. A refused track is logged with the reason and not queued; the report
+  still succeeds.
+- **The account** is the server's: a stored choice that still matches an
+  account wins, otherwise the only account, otherwise the first of several
+  (named in a warning). It is written into the synthetic client's `account`
+  preference, which is what LMS reads from then on.
+- **Now-playing** has no parameter. The newest accepted play is announced
+  only while `now - played < duration`; a play that has ended or has no
+  duration is recorded but not announced, and a retried report (all
+  duplicates) announces nothing. Ignore lists apply here too, unlike LMS's
+  own callback. The announcement goes out after the scrobbles, so it does not
+  clobber the display.
 
-**Account selection.** The server's configured accounts are the only input.
-A stored choice that still matches an account wins; otherwise a single account
-is used; otherwise the first of several is chosen and named in a warning. The
-choice is written into the synthetic client's own `account` preference, which
-is what every later LMS path reads. Older LMS stores a bare username there,
-newer LMS the full `username::api_type::api_url` id; the plugin asks the server
-which it expects rather than assuming.
+### Order of writes
 
-### Now-playing
-
-There is no now-playing parameter. A player has one current track, and the
-batch already says when each play started, so the plugin reads it from there:
-
-- The **newest accepted play** in the request is the candidate. Play time
-  decides, not position in the list; on a tie (a request without `played`
-  stamps every entry with one `now`) the last entry wins.
-- It is announced only if the server's clock is still inside that track's
-  **duration** — `now - played < duration`. A play that has ended announces
-  nothing, which is also what keeps a retried report (every entry a
-  duplicate, so nothing accepted) from announcing again.
-- No duration means no way to judge, and the plugin does not guess: the play
-  is recorded and the status is `skipped`.
-- The candidate is subject to the same eligibility checks as a scrobble,
-  unlike LMS's own callback, which announces before applying its ignore
-  lists: a track the user told LMS to ignore is not announced either.
-
-After the scrobbles are queued — so a scrobble does not clobber the display —
-the candidate is handed to the API. Historical now-playing is never replayed:
-only the newest play of the current request can be announced.
-
-**Order of writes.** Everything that can refuse the request is decided first:
-scrobbler eligibility and the queue cap. Then LMS, APC, Listening History, the
-scrobble queue, then now-playing, and only then is the duplicate store marked.
-A server that dies mid-entry re-applies that entry on retry rather than
-forgetting it.
+Everything that can refuse the request is decided first: scrobbler
+eligibility and the queue cap. The targets then write in order — LMS, APC,
+Listening History — followed by the scrobble queue and now-playing; only
+after that is the duplicate store marked. A server that dies mid-entry
+re-applies that entry on retry rather than forgetting it.
 
 ### Duplicates
 
@@ -277,24 +246,21 @@ differs on every call: send `played` if the caller may retry.
 ## Not a destination: What Was That Tune
 
 PlayHistory (Michael Herger's plugin) is not a destination. Its history is
-addressed per player, and a remote player is not a player LMS knows.
+addressed per player, and a remote player is not one LMS lists.
 
-**The entries cannot be read.** The plugin's pages are opened for a player, and
-LMS resolves that player id against the clients it knows — JSON-RPC's
-`params[0]`, the web UI's `player=`. A remote player is not one of them: the
-synthetic client exists only while a report runs and is in no player list. Its
-entries would at most appear as a row in the plugin's player menu, which is
-built from the history itself, and that row cannot be opened — the entries
-behind it are unreachable in the app and in the web UI.
+**The entries cannot be read.** The plugin's pages are opened for a player,
+and LMS's player lists leave hidden clients out
+(`Slim::Player::Client::clients` filters `hidden`); the synthetic client is a
+hidden one. Entries would at most show as
+a row in the plugin's own player menu, and that row does not open.
 
-**The write is hard to implement as well.** There is no "record this play"
-interface: the plugin logs a play by reading the URL from the *playing*
-client's playlist, so writing means fabricating client state. What it writes
-is stamped with the logging time rather than the play time, so a backlog loses
-its order; an entry identical to that player's newest one is dropped; the
-ignore-keyword list applies; and the buffer is an in-memory object that
-rewrites its own preference on every play, so a preference written directly is
-overwritten by the next live play. Nothing written can be deleted afterwards.
+**The write is awkward too.** There is no "record this play" interface: the
+plugin logs the URL of the *playing* client's playlist, so a write means
+fabricating client state. It stamps the logging time, not the play time; drops
+an entry identical to that player's newest; applies its ignore list; and keeps
+the buffer in memory, rewriting its own preference on every play, so a
+preference written directly is overwritten by the next live play. Nothing
+written can be deleted afterwards.
 
 ## The synthetic client
 
@@ -307,7 +273,8 @@ for the first call and is lost at the first of those.
 So one hidden client is created per remote player, from
 `Slim::Player::Disconnected`. It is invisible to the `players` query, the web
 UI and sync lists (`hidden` clients are filtered out), and it keeps each
-remote player's account, queue and session to itself.
+remote player's account, queue and session to itself. The Listening History
+target asks for the same client, because `Sources::describe` takes one.
 
 Its id is the **remote player's own id** — the same value APC records as
 `client_id` and the duplicate store keys on. One remote player is one identity
@@ -327,15 +294,14 @@ logged as unavailable.
 
 - **Each remote player gains one `_client:<playerid>` section** in
   `plugin.audioscrobbler.prefs`, holding its account and any pending
-  scrobbles. A player id that changes per request (as the test suite's do)
-  leaves one section per id.
+  scrobbles. A player id that changes per request (as the test suite's ids
+  do) leaves one section per id.
 - **Reporting real plays to a server with an account configured scrobbles
   them.** That is the feature, but it means a test run against such a server
   submits to that Last.fm profile.
 - **Listening History gains entries under the remote player's id**, in its own
   SQLite store. A track play is one entry; consecutive same-album plays are
   one album entry. Both are visible in the plugin's own app and can be removed
-  there with More → Remove. The plugin's retention setting applies to them
-  like any other entry.
+  there. The plugin's retention setting applies to them like any other entry.
 - **The play count cannot be undone through the plugin.** It can be edited in
   LMS's database, or reset from the track's information page.
