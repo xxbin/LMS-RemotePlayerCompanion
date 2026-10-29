@@ -296,9 +296,10 @@ logged as unavailable.
   `plugin.audioscrobbler.prefs`, holding its account and any pending
   scrobbles. A player id that changes per request (as the test suite's ids
   do) leaves one section per id.
-- **Reporting real plays to a server with an account configured scrobbles
-  them.** That is the feature, but it means a test run against such a server
-  submits to that Last.fm profile.
+- **A test run against a server with an account writes to that Last.fm
+  profile.** That is the feature working: reported plays are queued and
+  submitted like a real player's, through the server's own account — there is
+  no separate test identity to send them to.
 - **Listening History gains entries under the remote player's id**, in its own
   SQLite store. A track play is one entry; consecutive same-album plays are
   one album entry. Both are visible in the plugin's own app and can be removed
