@@ -13,8 +13,8 @@ One request carries a batch of plays. For every play it has not seen before,
 the plugin updates:
 
 - **LMS's play count** — `tracks_persistent`, the count the web UI shows;
-- **Alternative Play Count's Play History** — an entry in APC's own Play
-  History table;
+- **Alternative Play Count** — APC's own play count, its Play History row,
+  and its played/skipped bookkeeping, through APC's external report command;
 - **Listening History** — an entry in that plugin's own database, built with
   its own `Sources::describe`;
 - **AudioScrobbler** — an item in LMS's own scrobble queue, which LMS then
@@ -22,7 +22,7 @@ the plugin updates:
 
 ```
    player ──history report──▶ Remote Player Companion ──▶ LMS play count
-                                                        ├──▶ APC play history
+                                                        ├──▶ APC count and play history
                                                         ├──▶ Listening History entry
                                                         └──▶ AudioScrobbler queue ──▶ Last.fm
 ```
@@ -101,6 +101,12 @@ An ephemeral `RemoteTrack` is never inserted into the library. It exists so
 AudioScrobbler can ask the protocol handler for artist, title and duration,
 and so the local destinations can record its URL.
 
+Whichever parameter a play arrived through, the debug log says so: the
+request's first line is `history request: <playerid> input=id|url
+entries=N`. Resolution erases the distinction — every later line names the
+play by its url — and `id` and `url` are mutually exclusive, so one word per
+request covers the whole batch.
+
 ## The answer
 
 ```json
@@ -148,7 +154,8 @@ Errors are results, never request statuses: an error status closes the JSON-RPC
 socket with no body.
 
 Environmental gaps are **not** refusals. A missing or disabled APC, Listening
-History or AudioScrobbler plugin, APC's Play History switched off, statistics
+History or AudioScrobbler plugin, APC's Play History switched off (its counts
+still update), statistics
 switched off, no scrobbling account, scrobbling switched off, a library scan
 in progress, a track with no `tracks_persistent` row, or a play that
 Listening History declines (a station, a service track with no duration) is
@@ -165,23 +172,49 @@ skips a seek; a reported play is not one.) `lastplayed` becomes
 `max(existing, played)` and is never lowered, so an out-of-order report counts
 the play without moving the clock backwards.
 
-### 2. APC's Play History
+### 2. Alternative Play Count
 
-Each play becomes one Play History row, written with
-`AlternativePlayCount::Storage->addPlayEntry`: the URL, its md5, the
-MusicBrainz id, the play time, `remote`, and the remote player's id as
-`client_id`. That is the call APC's own analyser makes, except that `rating`
-is left empty and `played` is the reported start rather than the instant
-APC's own threshold fired.
+Each play is reported through APC's own external interface, the one it
+provides for a player that is not an LMS client:
 
-- **APC's counts are not touched.** They are tied to APC's own threshold and
-  skip handling, and an imported play has no skip history to rate.
-- **Nothing else changes either**: no dynamic played/skipped values, no auto
-  rating — a rating stamped today would be a rating given *after* the listen.
-- **The player row** is saved once per request, after the first row lands:
-  name from `playername`, else the name APC already has, else the id; model
+```
+alternativeplaycount reportplayback mac:<playerid> playername:<name>
+                       trackid:<id> percentplayed:100
+```
+
+It applies APC's own rules: the play count, `lastPlayed`, the Play History
+row, the dynamic played/skipped value and, when auto-rating is configured,
+the auto-rating step. `percentplayed:100` is above APC's threshold (validated
+to 10..90), so a reported play is always counted. The remote player decided
+it was a play; the server has no progress to judge.
+
+The command records the instant it runs, and a reported play may be days old.
+Two values are therefore corrected afterwards, each only when it differs:
+
+- **the Play History row's `played`** — the row APC just wrote gets the
+  reported start time, not the time of the report. Its rating is whatever
+  APC wrote.
+- **`lastPlayed`** — becomes `max(its previous value, played)`, so a backlog
+  cannot move the clock forward and an out-of-order report cannot move it
+  back. A play reported as it happens needs no correction at all.
+
+Everything else is APC's own, written by APC's own code: the count, the
+dynamic played/skipped value (which rises, as it does for any played track),
+and the rating when auto-rating is on.
+
+- **An entry with no library track has no id to report.** A URL only an
+  ephemeral `RemoteTrack` answers for is skipped (`no_track_id`); APC has no
+  count row for it either.
+- **A player id longer than 40 characters is skipped**
+  (`player_id_too_long`). `reportplayback` rejects it, and truncating would
+  file the play under a different player.
+- **The player row** is saved once per request, after the last report: name
+  from `playername`, else the name APC already has, else the id; model
   `remote`; `last_seen` set to now — a six-day-old play reported today still
-  means the player was seen today.
+  means the player was seen today. `reportplayback` saves the player itself
+  with no model, so this call is what restores it.
+- **With APC's Play History switched off**, APC writes neither the row nor
+  the player, so neither correction runs; the count still updates.
 
 ### 3. Listening History
 
@@ -290,12 +323,26 @@ different player, and the plugin refuses rather than spending that player's
 account and queue on this one. The report still succeeds; scrobbling is
 logged as unavailable.
 
+`Client::new` only registers the object. The preferences every client is
+expected to have are installed by `Client::init`, which runs when a player
+connects and never for a synthetic one. `forPlayer` therefore calls
+`initPrefs` on a client it created — without it, anything that formats a
+title for the client dies: `HTTP::getMetadataFor` asks for the current title
+while a remote URL is looked up, and `standardTitleFormat` dereferences
+`titleFormat` as an array. Every reported play from a remote player on a
+remote URL would then quietly fail its metadata lookup and go unscrobbled.
+
 ## Side effects worth knowing
 
 - **Each remote player gains one `_client:<playerid>` section** in
   `plugin.audioscrobbler.prefs`, holding its account and any pending
   scrobbles. A player id that changes per request (as the test suite's ids
   do) leaves one section per id.
+- **Each remote player also gains one `_client:<playerid>` section** in
+  `server.prefs` — LMS's standard client defaults (`titleFormat`,
+  `playername`, and so on), installed by `initPrefs`. A real client gets the
+  same section when it connects; a synthetic one has no connection to hang it
+  on, so the same "one section per id" growth applies.
 - **A test run against a server with an account writes to that Last.fm
   profile.** That is the feature working: reported plays are queued and
   submitted like a real player's, through the server's own account — there is
@@ -305,4 +352,9 @@ logged as unavailable.
   one album entry. Both are visible in the plugin's own app and can be removed
   there. The plugin's retention setting applies to them like any other entry.
 - **The play count cannot be undone through the plugin.** It can be edited in
-  LMS's database, or reset from the track's information page.
+  LMS's database, or reset from the track's information page. APC's count and
+  values for the track can be reset from its information page too ("Reset all
+  APC values for this track").
+- **APC's dynamic played/skipped value rises with every reported play**, as
+  it does for any play APC counts. The auto-rating step also runs when it is
+  configured; both are APC's own behaviour, not an extra write here.
