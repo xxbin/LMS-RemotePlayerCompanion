@@ -102,6 +102,7 @@ sub cliReport {
 			{
 				playerid   => $playerid,
 				playername => $playername,
+				input      => $is_id ? 'id' : 'url',
 				entries    => \@entries,
 				now        => $now,
 			}

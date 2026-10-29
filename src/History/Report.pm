@@ -25,6 +25,16 @@ sub run {
 	my $playerid = $args->{playerid};
 	my $entries  = $args->{entries} || [];
 
+	# What the request was, before any decision about it. `id` and `url` are
+	# mutually exclusive parameters, so one word says how every play in the
+	# batch came in. Every line after this one names a play by its resolved
+	# url, where the two are indistinguishable -- and a report is often read
+	# after the fact, so the answer has to be at the top of its own block.
+	main::DEBUGLOG && $log->is_debug && $log->debug(
+		'history request: ' . $playerid
+			. ' input=' . ( $args->{input} || '-' )
+			. ' entries=' . scalar @{$entries} );
+
 	my @new;
 	my $duplicates = 0;
 	my %in_request;
@@ -145,7 +155,9 @@ sub run {
 	# Each entry this report recorded, named in full. The per-destination
 	# lines above say how one fared but identify it only by url; this is the
 	# line that answers "what was that song" when a report is being traced.
-	# Duplicates never reach here -- they have their own lines above.
+	# Which parameter carried it in is on the request line instead: that is a
+	# property of the request, not of one entry. Duplicates never reach here
+	# -- they have their own lines above.
 	if ( main::DEBUGLOG && $log->is_debug ) {
 		for my $entry ( @new ) {
 			$log->debug(
