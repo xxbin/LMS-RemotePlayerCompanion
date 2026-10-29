@@ -48,7 +48,21 @@ sub forPlayer {
 		die "history client: $playerid is another client's name\n";
 	}
 
-	return $class->new($playerid);
+	# Client::new only registers the client. The preferences every client is
+	# expected to have -- titleFormat above all -- are installed by
+	# Client::init, which runs when a player connects and so never for this
+	# one. Without them, anything that formats a title for this client dies:
+	# HTTP::getMetadataFor asks for the current title while the scrobbler
+	# looks up a remote URL, and standardTitleFormat dereferences titleFormat
+	# as an array (Slim::Music::Info line 755). A remote player reporting a
+	# remote URL -- the case this family exists for -- would then silently
+	# never scrobble. initPrefs is the same call, minus display and alarms,
+	# and only fills what is missing, so it is harmless on a client LMS has
+	# already initialised.
+	$client = $class->new($playerid);
+	$client->initPrefs;
+
+	return $client;
 }
 
 # Client::ipport asserts a paddr, and Client::ip splits one. A synthetic
