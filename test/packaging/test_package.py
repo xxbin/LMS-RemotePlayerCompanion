@@ -39,6 +39,19 @@ def min_version():
     return manifest().find("targetApplication").findtext("minVersion").strip()
 
 
+def max_version():
+    """The ceiling install.xml declares.
+
+    LMS does not treat a missing one as "no ceiling": its version check
+    compares the running version against it, and an absent value compares as
+    empty, so the plugin is refused as incompatible. 0.7.0 shipped without
+    one and installed but never loaded -- unless the server had unsupported
+    extensions enabled, which is what hid it on the machine it was built on.
+    """
+    target = manifest().find("targetApplication")
+    return (target.findtext("maxVersion") or "").strip()
+
+
 def build(*args, cwd=ROOT):
     """Run build.py.
 
@@ -155,7 +168,14 @@ class Packaging(unittest.TestCase):
         passing after someone bumped one file and forgot the other."""
         plugin = self.listing().find("plugins/plugin")
         self.assertEqual(plugin.get("minTarget"), min_version())
-        self.assertEqual(plugin.get("maxTarget"), "*")
+        self.assertEqual(plugin.get("maxTarget"), max_version())
+
+    def test_install_xml_declares_a_ceiling_lms_will_accept(self):
+        """A manifest without a maxVersion installs and then never loads:
+        LMS compares the running version against an empty ceiling and calls
+        the plugin incompatible. The listing's maxTarget cannot make up for
+        it -- that is read by the extension manager, not by the loader."""
+        self.assertEqual(max_version(), "*")
 
     def test_a_tag_that_disagrees_with_the_version_is_refused(self):
         result = build("--out", self.out, "--tag", "v9.9.9")
